@@ -5,11 +5,9 @@ WORKDIR /app
 # Install dependencies
 RUN apk add --no-cache git ca-certificates
 
-# Copy go.mod and generate go.sum
-COPY go.mod ./
-RUN go mod tidy
-
-# Download dependencies
+# Copy go files
+COPY go.mod go.sum ./
+RUN go mod tidy # Tidy might update sum, but if sum is also copied, it should match
 RUN go mod download
 
 # Copy source code
@@ -20,16 +18,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 # Final stage
 FROM alpine:latest
-
 RUN apk --no-cache add ca-certificates
-
 WORKDIR /root/
-
-# Copy the binary from builder
 COPY --from=builder /app/main .
-
-# Expose port
 EXPOSE 8080
-
-# Run the application
 CMD ["./main"]
