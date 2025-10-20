@@ -5,6 +5,10 @@ WORKDIR /app
 # Install dependencies
 RUN apk add --no-cache git ca-certificates
 
+# Generate go.sum if missing
+COPY go.mod ./
+RUN go mod tidy
+
 # Copy go mod files
 COPY go.mod go.sum ./
 RUN go mod download
