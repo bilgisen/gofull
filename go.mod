@@ -6,7 +6,6 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/go-shiori/go-readability v0.0.0-20231029095239-6b97d5aba789
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/feeds v1.1.2
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/mmcdole/gofeed v1.2.1
 )

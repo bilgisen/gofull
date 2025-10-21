@@ -12,6 +12,7 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/go-shiori/go-readability"
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/PuerkitoBio/goquery"
 
 	"gofull/internal/extractors" // Registry ve Extractor için import
 )
@@ -139,7 +140,7 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item { // Item tipi burada dö
 		if err == nil {
 			// Extractor içerik veya görsel sağladıysa kullan
 			if extractedContent != "" {
-				content = extractedContent // Feed'deki content'i extractor'dan gelenle değiştir
+				content = cleanHTMLContent(extractedContent) // Feed'deki content'i extractor'dan gelenle değiştir
 			}
 			if len(extractedImages) > 0 {
 				imageURL = extractedImages[0] // İlk görsel URL'sini al
@@ -149,7 +150,7 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item { // Item tipi burada dö
 			if content == "" {
 				article, err := readability.FromURL(i.Link, 15*time.Second)
 				if err == nil {
-					content = article.TextContent
+					content = cleanHTMLContent(article.Content) // Readability içeriğini de temizle
 				}
 			}
 			// Görsel alımı için readability yeterli olmayabilir.

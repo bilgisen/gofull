@@ -72,6 +72,15 @@ func (d *DunyaExtractor) extractFromHTML(html string) (string, []string, error) 
 		return "", nil, err
 	}
 
+	// First, try to get meta tag images (more reliable for main article image)
+	var images []string
+	if ogImage, exists := doc.Find(`meta[property="og:image"]`).Attr("content"); exists && ogImage != "" {
+		images = append(images, ogImage)
+	}
+	if twitterImage, exists := doc.Find(`meta[name="twitter:image"]`).Attr("content"); exists && twitterImage != "" {
+		images = append(images, twitterImage)
+	}
+
 	// Target the specific content div for dunya.com
 	contentDiv := doc.Find(`div.content-text[property="articleBody"]`).First()
 	if contentDiv.Length() == 0 {
@@ -81,8 +90,7 @@ func (d *DunyaExtractor) extractFromHTML(html string) (string, []string, error) 
 	// Remove unwanted elements
 	contentDiv.Find("script, style, .ad, .advertisement, .social-share").Remove()
 
-	// Extract images before getting HTML
-	var images []string
+	// Extract images from content as fallback
 	contentDiv.Find("img").Each(func(i int, s *goquery.Selection) {
 		if src, exists := s.Attr("src"); exists && src != "" {
 			if strings.HasPrefix(src, "http") {

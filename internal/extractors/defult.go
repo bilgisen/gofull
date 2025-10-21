@@ -82,11 +82,16 @@ func (d *DefaultExtractor) extractFromURL(articleURL string) (string, []string, 
 	if err != nil {
 		return "", nil, err
 	}
-	return d.extractFromHTML(string(bodyBytes))
+	return d.extractFromHTMLWithBase(string(bodyBytes), articleURL)
 }
 
 // extractFromHTML attempts to find the main article container in a raw HTML string.
 func (d *DefaultExtractor) extractFromHTML(body string) (string, []string, error) {
+	return d.extractFromHTMLWithBase(body, "")
+}
+
+// extractFromHTMLWithBase attempts to find the main article container in a raw HTML string with base URL for relative links.
+func (d *DefaultExtractor) extractFromHTMLWithBase(body, baseURL string) (string, []string, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
 		return "", nil, err
@@ -110,7 +115,11 @@ func (d *DefaultExtractor) extractFromHTML(body string) (string, []string, error
 			htmlStr, _ := s.Html()
 			htmlStr = sanitizeHTML(htmlStr)
 			if htmlStr != "" {
-				imgs := extractImagesFromHTML(htmlStr)
+				// Try to get meta tag images first, then fall back to content images
+				imgs := extractImagesFromMetaTags(body)
+				if len(imgs) == 0 {
+					imgs = extractImagesFromHTMLWithBase(htmlStr, baseURL)
+				}
 				return htmlStr, imgs, nil
 			}
 		}
