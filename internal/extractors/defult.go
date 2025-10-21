@@ -20,8 +20,13 @@ type DefaultExtractor struct {
 }
 
 // NewDefaultExtractor constructs a DefaultExtractor. The httpClient can be nil to use http.DefaultClient.
-func NewDefaultExtractor(client *http.Client, logger interface{}) *DefaultExtractor {
-	return &DefaultExtractor{httpClient: client, userAgent: "Mozilla/5.0 (compatible; RSSFullTextBot/1.0)", logger: logger}
+// The logger must implement the interface{ Printf(...interface{}) } method, e.g., *zap.SugaredLogger.
+func NewDefaultExtractor(client *http.Client, logger interface{ Printf(...interface{}) }) *DefaultExtractor { // Değiştirildi
+	return &DefaultExtractor{
+		httpClient: client,
+		userAgent:  "Mozilla/5.0 (compatible; RSSFullTextBot/1.0)",
+		logger:     logger, // Artık tür uyumlu
+	}
 }
 
 func (d *DefaultExtractor) Extract(articleURL string) (string, []string, error) {
@@ -40,7 +45,7 @@ func (d *DefaultExtractor) Extract(articleURL string) (string, []string, error) 
 	// Fallback: fetch raw HTML and use goquery selectors to try to find main article
 	resp, err := d.httpClient.Get(articleURL)
 	if err != nil {
-		d.logger.Printf("http get failed: %v", err)
+		d.logger.Printf("http get failed: %v", err) // Bu satır artık doğru türle çalışır
 		return "", nil, err
 	}
 	defer resp.Body.Close()

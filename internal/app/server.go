@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log" // os kaldırıldı
 	"net/http"
 	"time"
 
@@ -59,6 +59,8 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	// init extractors registry and register default extractor
 	r := extractors.NewRegistry()
+	// logger bir *log.Logger türüdür ve interface{ Printf(...interface{}) } arayüzünü sağlar.
+	// Bu nedenle NewDefaultExtractor ile uyumludur.
 	r.RegisterDefault(extractors.NewDefaultExtractor(hc, logger))
 
 	// create server and mux

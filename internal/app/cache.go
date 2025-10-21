@@ -10,7 +10,7 @@ import (
 type Cache struct {
 	mu    sync.RWMutex
 	items map[string]CachedEntry
-	ttl   time.Duration
+	ttl   time.Duration // Field is ttl
 }
 
 // CachedEntry stores value and timestamp.
@@ -23,7 +23,7 @@ type CachedEntry struct {
 func NewCache(ttl time.Duration) *Cache {
 	return &Cache{
 		items: make(map[string]CachedEntry),
-		tl:    ttl,
+		ttl:    ttl, // Fixed: was tl
 	}
 }
 

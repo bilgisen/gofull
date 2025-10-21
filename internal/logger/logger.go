@@ -1,9 +1,10 @@
+// FILE: internal/logger/logger.go
 package logger
 
 import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
+	// "os" // <-- Kullanılmadığı için kaldırıldı
 )
 
 var Log *zap.Logger
