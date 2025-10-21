@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os" // os.Getenv için eklendi
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -52,8 +51,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	stdLogger := log.New(osStdout{}, "gofull: ", log.LstdFlags|log.Lmsgprefix)
-	// logWrapper kullan
-	logger := &logWrapper{Logger: stdLogger}
 
 	// simple http client wrapper (retryable inside)
 	hc := fetch.NewClient(fetch.ClientOptions{
