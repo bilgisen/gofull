@@ -43,7 +43,7 @@ func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	parsedFeed, err := h.FeedParser.ParseURLWithContext(ctx, feedURL)
+	parsedFeed, err := h.FeedParser.ParseURLWithContext(feedURL, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
