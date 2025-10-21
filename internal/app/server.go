@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mmcdole/gofeed"
-
 	"gofull/internal/extractors"
 	"gofull/internal/fetch"
 )
@@ -59,13 +57,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient())) // Değiştirildi
 
 	// FeedHandler oluştur
-	fp := gofeed.NewParser()
-	fh := &FeedHandler{
-		Client:     hc.StandardClient(),
-		Registry:   r,
-		Cache:      c,
-		FeedParser: fp,
-	}
+	fh := NewFeedHandler(c)
 
 	// create server and mux
 	s := &Server{
@@ -102,7 +94,7 @@ func (s *Server) Run(addr string) error {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/", s.handleHome)
-	s.mux.HandleFunc("/feed", s.handleFeed)
+	s.mux.Handle("/feed", s.feedHandler)
 	s.mux.HandleFunc("/health", s.handleHealth)
 }
 
@@ -242,32 +234,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(homeHTML))
-}
-
-// handleFeed handles the /feed endpoint.
-func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
-	feedURL := r.URL.Query().Get("url")
-	if feedURL == "" {
-		http.Error(w, "Missing 'url' query parameter", http.StatusBadRequest)
-		return
-	}
-
-	feed, err := s.feedHandler.ProcessFeed(feedURL)
-	if err != nil {
-		http.Error(w, "Failed to process feed", http.StatusInternalServerError)
-		return
-	}
-
-	// Assuming feed is a *feeds.Feed, serialize it to XML for RSS/Atom
-	atom, err := feed.ToAtom()
-	if err != nil {
-		http.Error(w, "Failed to serialize feed", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(atom))
 }
 
 // handleHealth returns JSON health information.
