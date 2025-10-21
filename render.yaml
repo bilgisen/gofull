@@ -2,9 +2,13 @@ services:
   - type: web
     name: gofull
     runtime: go
-    buildCommand: go build -o main .
-    startCommand: ./main
     envVars:
       - key: PORT
-        value: 8080
+        value: "8080"
+    buildCommand: |
+      go mod tidy
+      go mod download
+      go build -o main ./main.go
+    startCommand: ./main
     healthCheckPath: /health
+    plan: free
