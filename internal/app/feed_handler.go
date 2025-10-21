@@ -1,194 +1,135 @@
-package app
+package handlers
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-	"github.com/gorilla/feeds"
+	"gofull/internal/app"
+
 	"github.com/mmcdole/gofeed"
-	"gofull/internal/extractors"
+	"github.com/go-shiori/go-readability"
+	"github.com/hashicorp/go-retryablehttp"
 )
 
-// FeedHandler orchestrates RSS/Atom feed fetching and content enrichment.
+// FeedHandler handles fetching and returning RSS feed content.
+// Uses in-memory cache to reduce redundant fetches.
 type FeedHandler struct {
-	Client     *http.Client
-	Registry   *extractors.Registry
-	Cache      *Cache
-	FeedParser *gofeed.Parser
+	Cache *app.Cache
 }
 
-// NewFeedHandler builds a ready-to-use FeedHandler with sane defaults.
-func NewFeedHandler() *FeedHandler {
-	client := &http.Client{Timeout: 20 * time.Second}
-	reg := extractors.NewRegistry()
-	reg.RegisterDefault(extractors.NewDefaultExtractor(client))
-
-	return &FeedHandler{
-		Client:     client,
-		Registry:   reg,
-		Cache:      NewCache(200), // in-memory cache capacity
-		FeedParser: gofeed.NewParser(),
-	}
+// NewFeedHandler creates a new FeedHandler.
+func NewFeedHandler(cache *app.Cache) *FeedHandler {
+	return &FeedHandler{Cache: cache}
 }
 
-// ProcessFeed fetches and processes a full feed concurrently.
-func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-
-	parsedFeed, err := h.FeedParser.ParseURLWithContext(feedURL, ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse feed: %w", err)
-	}
-	if parsedFeed == nil {
-		return nil, fmt.Errorf("parsed feed is nil")
+// ServeHTTP implements http.Handler for FeedHandler.
+func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	url := strings.TrimSpace(r.URL.Query().Get("url"))
+	if url == "" {
+		http.Error(w, "missing 'url' parameter", http.StatusBadRequest)
+		return
 	}
 
-	outputFeed := &feeds.Feed{
-		Title:       parsedFeed.Title,
-		Link:        &feeds.Link{Href: feedURL},
-		Description: parsedFeed.Description,
-		Author: &feeds.Author{
-			Name:  parsedFeed.Author.Name,
-			Email: parsedFeed.Author.Email,
-		},
-		Created: time.Now(),
-	}
-
-	// --- Concurrency setup ---
-	var wg sync.WaitGroup
-	itemChan := make(chan *feeds.Item, len(parsedFeed.Items))
-
-	for _, item := range parsedFeed.Items {
-		it := item // avoid closure capture bug
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			ctxItem, cancel := context.WithTimeout(ctx, 20*time.Second)
-			defer cancel()
-
-			processed, err := h.processItemWithCtx(ctxItem, it)
-			if err != nil {
-				log.Printf("[WARN] failed item: %s | %v", it.Link, err)
-				return
-			}
-			itemChan <- processed
-		}()
-	}
-
-	wg.Wait()
-	close(itemChan)
-
-	for it := range itemChan {
-		outputFeed.Items = append(outputFeed.Items, it)
-	}
-
-	if len(outputFeed.Items) == 0 {
-		return nil, errors.New("no valid items processed")
-	}
-
-	return outputFeed, nil
-}
-
-// processItemWithCtx extracts, cleans, caches and returns a feeds.Item.
-func (h *FeedHandler) processItemWithCtx(ctx context.Context, item *gofeed.Item) (*feeds.Item, error) {
-	if item == nil || item.Link == "" {
-		return nil, fmt.Errorf("invalid item or missing link")
-	}
-
-	cacheKey := item.Link
-	if cached, ok := h.Cache.Get(cacheKey); ok && cached != "" {
-		return h.buildFeedItem(item, cached, nil), nil
-	}
-
-	domainExtractor := h.Registry.ForURL(item.Link)
-	var contentHTML string
-	var images []string
-	var err error
-
-	// Prefer feed-provided HTML if available
-	if item.Content != "" && strings.Contains(item.Content, "<") {
-		contentHTML, images, err = domainExtractor.Extract(map[string]string{"html": item.Content})
-	} else {
-		contentHTML, images, err = domainExtractor.Extract(item.Link)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("extract failed: %w", err)
-	}
-	if contentHTML == "" {
-		return nil, errors.New("empty content")
-	}
-
-	h.Cache.Set(cacheKey, contentHTML)
-	return h.buildFeedItem(item, contentHTML, images), nil
-}
-
-// buildFeedItem constructs a full feeds.Item ready for serialization.
-func (h *FeedHandler) buildFeedItem(src *gofeed.Item, content string, images []string) *feeds.Item {
-	item := &feeds.Item{
-		Id:          extractors.GenerateUniqueID(),
-		Title:       strings.TrimSpace(src.Title),
-		Link:        &feeds.Link{Href: src.Link},
-		Description: summarizeHTML(content, 300),
-		Content:     content,
-		Created:     coalesceTime(src.PublishedParsed, time.Now()),
-		Updated:     coalesceTime(src.UpdatedParsed, coalesceTime(src.PublishedParsed, time.Now())),
-	}
-
-	if src.Author != nil && src.Author.Name != "" {
-		item.Author = &feeds.Author{Name: src.Author.Name}
-	}
-
-	if len(images) > 0 {
-		item.Enclosure = &feeds.Enclosure{
-			Url:  images[0],
-			Type: detectImageType(images[0]),
+	// Parse limit param (default: 10)
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			limit = n
 		}
 	}
 
-	return item
+	cacheKey := fmt.Sprintf("%s|%d", url, limit)
+
+	// Check cache
+	if cached, ok := h.Cache.Get(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write([]byte(cached))
+		return
+	}
+
+	// Use retryable HTTP client
+	client := retryablehttp.NewClient()
+	client.RetryMax = 3
+	client.Logger = nil
+
+	// Fetch RSS feed
+	resp, err := client.StandardClient().Get(url)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to fetch RSS: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	parser := gofeed.NewParser()
+	feed, err := parser.Parse(resp.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse feed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Limit items
+	if len(feed.Items) > limit {
+		feed.Items = feed.Items[:limit]
+	}
+
+	// Process each entry content
+	type Item struct {
+		Title       string `json:"title"`
+		Link        string `json:"link"`
+		Published   string `json:"published"`
+		Description string `json:"description,omitempty"`
+		Content     string `json:"content,omitempty"`
+	}
+
+	var items []Item
+	for _, i := range feed.Items {
+		content := i.Content
+		if content == "" && i.Link != "" {
+			// Try extracting readable content
+			article, err := readability.FromURL(i.Link, 15*time.Second)
+			if err == nil {
+				content = article.TextContent
+			}
+		}
+
+		items = append(items, Item{
+			Title:       i.Title,
+			Link:        i.Link,
+			Published:   formatTime(i.PublishedParsed),
+			Description: i.Description,
+			Content:     strings.TrimSpace(content),
+		})
+	}
+
+	data := map[string]any{
+		"feed_title": feed.Title,
+		"feed_link":  feed.Link,
+		"item_count": len(items),
+		"items":      items,
+	}
+
+	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		http.Error(w, "failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	// Cache the JSON response
+	h.Cache.Set(cacheKey, string(jsonBytes))
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(jsonBytes)
 }
 
-// summarizeHTML strips HTML and truncates plain text for feed description.
-func summarizeHTML(html string, limit int) string {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
+func formatTime(t *time.Time) string {
+	if t == nil {
 		return ""
 	}
-	text := strings.Join(strings.Fields(doc.Text()), " ")
-	if len(text) > limit {
-		text = text[:limit] + "..."
-	}
-	return text
-}
-
-// detectImageType makes a best guess from URL extension.
-func detectImageType(url string) string {
-	switch {
-	case strings.HasSuffix(url, ".png"):
-		return "image/png"
-	case strings.HasSuffix(url, ".webp"):
-		return "image/webp"
-	case strings.HasSuffix(url, ".gif"):
-		return "image/gif"
-	default:
-		return "image/jpeg"
-	}
-}
-
-// coalesceTime returns the first non-nil time pointer or fallback.
-func coalesceTime(t1 *time.Time, fallback time.Time) time.Time {
-	if t1 != nil {
-		return *t1
-	}
-	return fallback
+	return t.Format(time.RFC3339)
 }
