@@ -27,7 +27,7 @@ type FeedHandler struct {
 
 // ProcessFeed fetches a feed URL, extracts and cleans each item, and returns a unified feed.
 func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
-	logger.Log.Sugar().Info("Processing feed", zap.String("url", feedURL))
+	logger.Log.Sugar().Info("Processing feed", zap.String("url", feedURL)) // Artık global logger.Log başlatılmış olmalı
 	parsedFeed, err := h.FeedParser.ParseURL(feedURL)
 	if err != nil {
 		logger.Log.Sugar().Error("Failed to parse feed", zap.String("url", feedURL), zap.Error(err))

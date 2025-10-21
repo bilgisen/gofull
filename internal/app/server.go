@@ -6,14 +6,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os" // os.Getenv için eklendi
 	"time"
 
 	"github.com/mmcdole/gofeed"
 
 	"gofull/internal/extractors"
 	"gofull/internal/fetch"
-	// "gofull/internal/logger" // Kullanılmadığı için kaldırıldı
+	"gofull/internal/logger" // logger.Log ve logger.InitLogger için eklendi
 )
+
+// init fonksiyonu, logger'ı başlatmak için app paketine eklendi.
+func init() {
+	logger.InitLogger(os.Getenv("APP_ENV")) // global logger.Log'u başlatır
+}
 
 // logWrapper wraps *log.Logger to match interface{ Printf(...interface{}) }
 type logWrapper struct {
