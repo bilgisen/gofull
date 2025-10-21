@@ -2,7 +2,6 @@ package extractors
 
 import (
 	"errors"
-	"net/http"
 
 	"github.com/google/uuid"
 )
