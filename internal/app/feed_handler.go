@@ -34,12 +34,16 @@ func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
 
+	// Nil check for parsedFeed
+	if parsedFeed == nil {
+		logger.Log.Sugar().Error("Parsed feed is nil", zap.String("url", feedURL))
+		return nil, fmt.Errorf("parsed feed is nil")
+	}
+
 	outputFeed := &feeds.Feed{
 		Title:       parsedFeed.Title,
 		Link:        &feeds.Link{Href: feedURL},
 		Description: parsedFeed.Description,
-		Author:      &feeds.Author{Name: parsedFeed.Author.Name},
-		Created:     time.Now(),
 	}
 
 	for _, item := range parsedFeed.Items {
