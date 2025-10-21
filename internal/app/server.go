@@ -50,8 +50,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = DefaultConfig()
 	}
 
-	stdLogger := log.New(osStdout{}, "gofull: ", log.LstdFlags|log.Lmsgprefix)
-
 	// simple http client wrapper (retryable inside)
 	hc := fetch.NewClient(fetch.ClientOptions{
 		Timeout:   cfg.RequestTimeout,
@@ -331,11 +329,4 @@ func (s *Server) cacheCleanerLoop() {
 			return
 		}
 	}
-}
-
-// osStdout implements io.Writer so we can wrap standard output logger without importing os everywhere.
-type osStdout struct{}
-
-func (osStdout) Write(p []byte) (n int, err error) {
-	return fmt.Print(string(p))
 }
