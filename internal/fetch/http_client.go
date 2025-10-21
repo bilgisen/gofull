@@ -28,6 +28,11 @@ func NewClient(opts ClientOptions) *Client {
 	return &Client{inner: r}
 }
 
+// StandardClient returns the underlying *http.Client.
+func (c *Client) StandardClient() *http.Client {
+	return c.inner.StandardClient()
+}
+
 // Get returns the HTTP response body bytes via http.Get-style convenience.
 func (c *Client) Get(url string, headers map[string]string) (*http.Response, error) {
 	req, err := retryablehttp.NewRequest("GET", url, nil)

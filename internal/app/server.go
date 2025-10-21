@@ -1,7 +1,6 @@
 // FILE: internal/app/server.go
 package app
 
-// "context" importu kaldırıldı
 import (
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,7 @@ import (
 
 	"gofull/internal/extractors"
 	"gofull/internal/fetch"
-	"gofull/internal/logger" // logger.Log kullanmak için eklendi
+	// "gofull/internal/logger" // Kullanılmadığı için kaldırıldı
 )
 
 // logWrapper wraps *log.Logger to match interface{ Printf(...interface{}) }
@@ -82,7 +81,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	// FeedHandler oluştur
 	fp := gofeed.NewParser()
 	fh := &FeedHandler{
-		Client:     hc.StandardClient(), // fetch.Client değil, *http.Client
+		Client:     hc.StandardClient(), // fetch.Client değil, *http.Client -> fetch.Client.StandardClient() metodu ile al
 		Registry:   r,
 		Cache:      c,
 		FeedParser: fp,
