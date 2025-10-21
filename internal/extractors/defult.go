@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,8 +58,12 @@ func (d *DefaultExtractor) extractFromURL(articleURL string) (string, []string, 
 	// First: try go-readability
 	doc, err := readability.FromURL(articleURL, 15*time.Second)
 	if err == nil && strings.TrimSpace(doc.Content) != "" {
-		imgs := extractImagesFromHTML(doc.Content)
-		return sanitizeHTML(doc.Content), imgs, nil
+		// Try to get meta tag images first, then fall back to content images
+		imgUrls := extractImagesFromMetaTags(doc.Content)
+		if len(imgUrls) == 0 {
+			imgUrls = extractImagesFromHTMLWithBase(doc.Content, articleURL)
+		}
+		return sanitizeHTML(doc.Content), imgUrls, nil
 	}
 
 	// Second: manual fetch and goquery fallback

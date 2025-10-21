@@ -37,8 +37,8 @@ func (d *DunyaExtractor) Extract(input any) (string, []string, error) {
 		return d.extractFromURL(v)
 	case map[string]string:
 		// Input is HTML content
-		if html, ok := v["html"]; ok {
-			return d.extractFromHTML(html)
+		if htmlContent, ok := v["html"]; ok {
+			return d.extractFromHTML(htmlContent)
 		}
 		return "", nil, fmt.Errorf("missing 'html' key in input map")
 	default:
@@ -67,8 +67,8 @@ func (d *DunyaExtractor) extractFromURL(articleURL string) (string, []string, er
 }
 
 // extractFromHTML extracts content from HTML using dunya.com specific selectors.
-func (d *DunyaExtractor) extractFromHTML(html string) (string, []string, error) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", nil, err
 	}
