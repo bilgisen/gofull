@@ -140,8 +140,34 @@ func sanitizeHTML(html string) string {
 	return html
 }
 
-// extractImagesFromHTML collects all non-empty <img src="..."> values.
-func extractImagesFromHTML(html string) []string {
+// extractImagesFromMetaTags extracts image URLs from Open Graph and Twitter Card meta tags.
+func extractImagesFromMetaTags(html string) []string {
+	var images []string
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+
+	// Open Graph image
+	if ogImage, exists := doc.Find(`meta[property="og:image"]`).Attr("content"); exists && ogImage != "" {
+		images = append(images, ogImage)
+	}
+
+	// Twitter Card image
+	if twitterImage, exists := doc.Find(`meta[name="twitter:image"]`).Attr("content"); exists && twitterImage != "" {
+		images = append(images, twitterImage)
+	}
+
+	// Article image (schema.org)
+	if articleImage, exists := doc.Find(`meta[property="article:image"]`).Attr("content"); exists && articleImage != "" {
+		images = append(images, articleImage)
+	}
+
+	return images
+}
+
+// extractImagesFromHTMLWithBase collects all non-empty <img src="..."> values.
+func extractImagesFromHTMLWithBase(html, baseURL string) []string {
 	var images []string
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -150,7 +176,34 @@ func extractImagesFromHTML(html string) []string {
 
 	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
 		if src, ok := s.Attr("src"); ok && src != "" {
-			if !strings.HasPrefix(src, "data:") && len(src) > 6 {
+			// Skip data URLs and very short URLs
+			if strings.HasPrefix(src, "data:") || len(src) < 6 {
+				return
+			}
+
+			// Convert relative URLs to absolute URLs
+			if !strings.HasPrefix(src, "http") {
+				// Handle protocol-relative URLs (//example.com/image.jpg)
+				if strings.HasPrefix(src, "//") {
+					images = append(images, "https:"+src)
+					return
+				}
+
+				// Handle relative URLs
+				if strings.HasPrefix(src, "/") {
+					// Absolute path from domain root
+					if parsedURL, err := url.Parse(baseURL); err == nil {
+						images = append(images, parsedURL.Scheme+"://"+parsedURL.Host+src)
+					}
+				} else {
+					// Relative path - combine with base URL path
+					if parsedURL, err := url.Parse(baseURL); err == nil {
+						baseDir := strings.TrimSuffix(parsedURL.Path, "/")
+						fullURL := baseDir + "/" + strings.TrimPrefix(src, "./")
+						images = append(images, parsedURL.Scheme+"://"+parsedURL.Host+fullURL)
+					}
+				}
+			} else {
 				images = append(images, src)
 			}
 		}
