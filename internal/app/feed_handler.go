@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"gofull/internal/app"
-
 	"github.com/mmcdole/gofeed"
 	"github.com/go-shiori/go-readability"
 	"github.com/hashicorp/go-retryablehttp"
@@ -19,11 +17,11 @@ import (
 // FeedHandler handles fetching and returning RSS feed content.
 // Uses in-memory cache to reduce redundant fetches.
 type FeedHandler struct {
-	Cache *app.Cache
+	Cache *Cache
 }
 
 // NewFeedHandler creates a new FeedHandler.
-func NewFeedHandler(cache *app.Cache) *FeedHandler {
+func NewFeedHandler(cache *Cache) *FeedHandler {
 	return &FeedHandler{Cache: cache}
 }
 
