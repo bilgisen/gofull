@@ -12,8 +12,8 @@ import (
 // DunyaExtractor handles content extraction for dunya.com domain.
 // Only processes URLs that match specific patterns.
 type DunyaExtractor struct {
-	httpClient *http.Client
-	allowedPatterns []string
+	httpClient      *http.Client
+	allowedPrefixes []string // Daha açıklayıcı bir isim
 }
 
 // NewDunyaExtractor creates a new DunyaExtractor with URL pattern filtering.
@@ -23,45 +23,44 @@ func NewDunyaExtractor(client *http.Client) *DunyaExtractor {
 	}
 	return &DunyaExtractor{
 		httpClient: client,
-		allowedPatterns: []string{
-			"is-dunyasi",  // İş dünyası kategorisi
-			"finans",      // Finans kategorisi
-			"sektorler",      // Sektorler kategorisi
+		allowedPrefixes: []string{ // allowedPatterns yerine allowedPrefixes
+			"https://www.dunya.com/is-dunyasi/", // Fazladan boşluklar silindi
+			"https://www.dunya.com/finans/",     // Fazladan boşluklar silindi
+			"https://www.dunya.com/sektorler/",  // Fazladan boşluklar silindi
+			// Gerekirse daha fazla önek eklenebilir
 		},
 	}
 }
 
-// shouldProcessURL checks if a URL should be processed based on patterns.
+// shouldProcessURL checks if a URL should be processed based on allowed prefixes.
 func (d *DunyaExtractor) shouldProcessURL(url string) bool {
-	// Check if URL matches any of the allowed patterns
-	for _, pattern := range d.allowedPatterns {
-		if strings.Contains(url, pattern) {
+	// Check if URL starts with any of the allowed prefixes
+	for _, prefix := range d.allowedPrefixes {
+		if strings.HasPrefix(url, prefix) { // Bu yapı zaten alt kategorileri de kapsar
 			return true
 		}
 	}
-
-	// Also allow specific category patterns
-	if strings.HasPrefix(url, "https://www.dunya.com/is-dunyasi/") ||
-	   strings.HasPrefix(url, "https://www.dunya.com/finans/") ||
-	   strings.HasPrefix(url, "https://www.dunya.com/sektorler/") {
-		return true
-	}
-
-	return false
+	return false // Hiçbiriyle başlamıyorsa işlememeli
 }
 
 // Extract implements the Extractor interface for dunya.com URLs.
 func (d *DunyaExtractor) Extract(input any) (string, []string, error) {
 	switch v := input.(type) {
 	case string:
-		// Check if URL matches allowed patterns
+		// Check if URL matches allowed prefixes
 		if !d.shouldProcessURL(v) {
-			return "", nil, fmt.Errorf("URL does not match allowed patterns for dunya.com")
+			return "", nil, fmt.Errorf("URL does not match allowed prefixes for dunya.com: %s", v)
 		}
 		// Input is a URL, fetch and extract content
 		return d.extractFromURL(v)
 	case map[string]string:
-		// Input is HTML content - we can't check URL pattern here, so allow it
+		// Input is HTML content - we can't check URL prefix here, so allow it
+		// NOT: Bu durumda URL filtresi atlanır. Eğer HTML girişi için de filtrelemek istiyorsanız
+		// bu fonksiyona URL'yi de ekstra parametre olarak geçmeniz gerekir.
+		// Örnek: func (d *DunyaExtractor) Extract(input any, sourceURL string) ...
+		// veya input map'e url anahtarı eklenmeli.
+		// Şimdilik, sadece string (URL) girişi için filtreleme yapıldığını varsayalım.
+		// Bu nedenle, HTML girişi için filtreleme yapmıyoruz.
 		if html, ok := v["html"]; ok {
 			return d.extractFromHTML(html)
 		}

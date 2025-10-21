@@ -1,9 +1,11 @@
+// internal/app/feed_handler.go
 package app
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -11,23 +13,32 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/go-shiori/go-readability"
 	"github.com/hashicorp/go-retryablehttp"
+
+	"gofull/internal/extractors" // Registry ve Extractor için import
 )
 
 // FeedHandler handles fetching and returning RSS feed content.
 // Uses in-memory cache to reduce redundant fetches.
 type FeedHandler struct {
-	Cache *Cache
+	Cache    *Cache
+	Client   *http.Client // Extractor'lar için HTTP client gerekebilir
+	Registry *extractors.Registry // Extractor seçimi için Registry
 }
 
 // NewFeedHandler creates a new FeedHandler.
-func NewFeedHandler(cache *Cache) *FeedHandler {
-	return &FeedHandler{Cache: cache}
+// Registry ve Client artık FeedHandler'ın bir parçası.
+func NewFeedHandler(cache *Cache, client *http.Client, registry *extractors.Registry) *FeedHandler {
+	return &FeedHandler{
+		Cache:    cache,
+		Client:   client, // retryablehttp.NewClient().StandardClient() gibi bir şey olabilir
+		Registry: registry,
+	}
 }
 
 // ServeHTTP implements http.Handler for FeedHandler.
 func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	url := strings.TrimSpace(r.URL.Query().Get("url"))
-	if url == "" {
+	urlParam := strings.TrimSpace(r.URL.Query().Get("url"))
+	if urlParam == "" {
 		http.Error(w, "missing 'url' parameter", http.StatusBadRequest)
 		return
 	}
@@ -41,7 +52,7 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cacheKey := fmt.Sprintf("%s|%d", url, limit)
+	cacheKey := fmt.Sprintf("%s|%d", urlParam, limit)
 
 	// Check cache
 	if cached, ok := h.Cache.Get(cacheKey); ok {
@@ -56,7 +67,7 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client.Logger = nil
 
 	// Fetch RSS feed
-	resp, err := client.StandardClient().Get(url)
+	resp, err := client.StandardClient().Get(urlParam)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to fetch RSS: %v", err), http.StatusBadGateway)
 		return
@@ -82,26 +93,14 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Published   string `json:"published"`
 		Description string `json:"description,omitempty"`
 		Content     string `json:"content,omitempty"`
+		Image       string `json:"image,omitempty"` // Yeni alan
 	}
 
 	var items []Item
 	for _, i := range feed.Items {
-		content := i.Content
-		if content == "" && i.Link != "" {
-			// Try extracting readable content
-			article, err := readability.FromURL(i.Link, 15*time.Second)
-			if err == nil {
-				content = article.TextContent
-			}
-		}
-
-		items = append(items, Item{
-			Title:       i.Title,
-			Link:        i.Link,
-			Published:   formatTime(i.PublishedParsed),
-			Description: i.Description,
-			Content:     strings.TrimSpace(content),
-		})
+		// processItem fonksiyonunu çağır
+		item := h.processItem(i)
+		items = append(items, item)
 	}
 
 	data := map[string]any{
@@ -122,6 +121,50 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(jsonBytes)
+}
+
+// processItem extracts content and image using registered extractors.
+func (h *FeedHandler) processItem(i *gofeed.Item) Item {
+	content := i.Content
+	imageURL := "" // Varsayılan olarak boş
+
+	if i.Link != "" {
+		// Registry'den uygun extractor'ı al
+		extractor := h.Registry.ForURL(i.Link)
+
+		// Extractor'dan içerik ve görsel al
+		// DunyaExtractor any input destekliyor.
+		// DefaultExtractor da any input destekliyor.
+		extractedContent, extractedImages, err := extractor.Extract(i.Link)
+		if err == nil {
+			// Extractor içerik veya görsel sağladıysa kullan
+			if extractedContent != "" {
+				content = extractedContent // Feed'deki content'i extractor'dan gelenle değiştir
+			}
+			if len(extractedImages) > 0 {
+				imageURL = extractedImages[0] // İlk görsel URL'sini al
+			}
+		} else {
+			// Extractor başarısız olursa, readability ile dene (eski yöntem)
+			if content == "" {
+				article, err := readability.FromURL(i.Link, 15*time.Second)
+				if err == nil {
+					content = article.TextContent
+				}
+			}
+			// Görsel alımı için readability yeterli olmayabilir.
+			// DunyaExtractor gibi özel extractor'lar görsel alımında daha başarılıdır.
+		}
+	}
+
+	return Item{
+		Title:       i.Title,
+		Link:        i.Link,
+		Published:   formatTime(i.PublishedParsed),
+		Description: i.Description,
+		Content:     strings.TrimSpace(content),
+		Image:       imageURL, // Yeni alan
+	}
 }
 
 func formatTime(t *time.Time) string {

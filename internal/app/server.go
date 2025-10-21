@@ -1,3 +1,4 @@
+// internal/app/server.go
 package app
 
 import (
@@ -54,20 +55,21 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	// init extractors registry and register default extractor
 	r := extractors.NewRegistry()
-	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient())) // Değiştirildi
+	// RegisterDefaultExtractor artık sadece http.Client alıyor (logger kaldırıldıysa)
+	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient()))
 
 	// Register domain-specific extractors
 	r.RegisterDomain("dunya.com", extractors.NewDunyaExtractor(hc.StandardClient()))
 
-	// FeedHandler oluştur
-	fh := NewFeedHandler(c)
+	// FeedHandler oluştur - Cache, Client ve Registry'yi geç
+	fh := NewFeedHandler(c, hc.StandardClient(), r)
 
 	// create server and mux
 	s := &Server{
 		cfg:         cfg,
 		cache:       c,
 		httpClient:  hc,
-		extractors:  r,
+		extractors:  r, // Registry'yi Server yapısına da atadık (gelecekte lazım olabilir)
 		feedHandler: fh,
 		mux:         http.NewServeMux(),
 		shutdown:    make(chan struct{}),
@@ -97,7 +99,7 @@ func (s *Server) Run(addr string) error {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/", s.handleHome)
-	s.mux.Handle("/feed", s.feedHandler)
+	s.mux.Handle("/feed", s.feedHandler) // FeedHandler http.Handler arayüzünü uyguluyor
 	s.mux.HandleFunc("/health", s.handleHealth)
 }
 
@@ -214,7 +216,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		<div class="form-container">
 			<h2 style="margin-bottom: 20px; color: #333;">Try It Now</h2>
 			<form action="/feed" method="get">
-				<input type="url" name="url" placeholder="Enter RSS Feed URL (e.g., https://example.com/rss)" required>
+				<input type="url" name="url" placeholder="Enter RSS Feed URL (e.g., https://example.com/rss  )" required>
 				<input type="number" name="limit" placeholder="Limit" min="1" max="100" value="10" title="Number of articles to fetch">
 				<button type="submit">Generate</button>
 			</form>
@@ -224,7 +226,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 			<h3>API Usage</h3>
 			<p>GET endpoint:</p>
 			<code>/feed?url={RSS_URL}&limit={NUMBER}</code><br>
-			<p>Example: <code>/feed?url=https://news.ycombinator.com/rss&limit=15</code></p>
+			<p>Example: <code>/feed?url=https://news.ycombinator.com/rss&limit=15  </code></p>
 		</div>
 
 		<div class="footer">
