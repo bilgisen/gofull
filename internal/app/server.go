@@ -1,17 +1,29 @@
 // FILE: internal/app/server.go
 package app
 
+// "context" importu kaldırıldı
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log" // os kaldırıldı
+	"log"
 	"net/http"
 	"time"
 
+	"github.com/mmcdole/gofeed"
+
 	"gofull/internal/extractors"
 	"gofull/internal/fetch"
+	"gofull/internal/logger" // logger.Log kullanmak için eklendi
 )
+
+// logWrapper wraps *log.Logger to match interface{ Printf(...interface{}) }
+type logWrapper struct {
+	*log.Logger
+}
+
+func (lw *logWrapper) Printf(v ...interface{}) {
+	lw.Logger.Printf(fmt.Sprint(v...)) // fmt.Sprint ile tüm argümanları tek string haline getir
+}
 
 // Config holds runtime settings for the server.
 type Config struct {
@@ -32,11 +44,13 @@ func DefaultConfig() *Config {
 // Server is the application server.
 type Server struct {
 	cfg      *Config
-	logger   *log.Logger
+	logger   *logWrapper // *log.Logger yerine logWrapper
 	cache    *Cache
 	httpClient *fetch.Client
 	// extractor registry (domain -> extractor)
 	extractors *extractors.Registry
+	// FeedHandler eklendi
+	feedHandler *FeedHandler
 	mux      *http.ServeMux
 	shutdown chan struct{}
 }
@@ -47,7 +61,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = DefaultConfig()
 	}
 
-	logger := log.New(osStdout{}, "gofull: ", log.LstdFlags|log.Lmsgprefix)
+	stdLogger := log.New(osStdout{}, "gofull: ", log.LstdFlags|log.Lmsgprefix)
+	// logWrapper kullan
+	logger := &logWrapper{Logger: stdLogger}
 
 	// simple http client wrapper (retryable inside)
 	hc := fetch.NewClient(fetch.ClientOptions{
@@ -59,19 +75,29 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	// init extractors registry and register default extractor
 	r := extractors.NewRegistry()
-	// logger bir *log.Logger türüdür ve interface{ Printf(...interface{}) } arayüzünü sağlar.
-	// Bu nedenle NewDefaultExtractor ile uyumludur.
-	r.RegisterDefault(extractors.NewDefaultExtractor(hc, logger))
+	// HATA: hc.StandardClient() kullan
+	// HATA: logger wrapper kullan
+	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient(), logger)) // Değiştirildi
+
+	// FeedHandler oluştur
+	fp := gofeed.NewParser()
+	fh := &FeedHandler{
+		Client:     hc.StandardClient(), // fetch.Client değil, *http.Client
+		Registry:   r,
+		Cache:      c,
+		FeedParser: fp,
+	}
 
 	// create server and mux
 	s := &Server{
-		cfg:       cfg,
-		logger:    logger,
-		cache:     c,
-		httpClient: hc,
-		extractors: r,
-		mux:       http.NewServeMux(),
-		shutdown:  make(chan struct{}),
+		cfg:         cfg,
+		logger:      logger,
+		cache:       c,
+		httpClient:  hc,
+		extractors:  r,
+		feedHandler: fh, // Eklendi
+		mux:         http.NewServeMux(),
+		shutdown:    make(chan struct{}),
 	}
 
 	s.registerRoutes()
@@ -100,7 +126,7 @@ func (s *Server) Run(addr string) error {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/", s.handleHome)
-	s.mux.HandleFunc("/feed", s.handleFeed)
+	s.mux.HandleFunc("/feed", s.handleFeed) // handleFeed metodu artık var
 	s.mux.HandleFunc("/health", s.handleHealth)
 }
 
@@ -119,6 +145,34 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
+}
+
+// handleFeed handles the /feed endpoint.
+func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
+	feedURL := r.URL.Query().Get("url")
+	if feedURL == "" {
+		http.Error(w, "Missing 'url' query parameter", http.StatusBadRequest)
+		return
+	}
+
+	feed, err := s.feedHandler.ProcessFeed(feedURL)
+	if err != nil {
+		s.logger.Printf("Error processing feed %s: %v", feedURL, err)
+		http.Error(w, "Failed to process feed", http.StatusInternalServerError)
+		return
+	}
+
+	// Assuming feed is a *feeds.Feed, serialize it to XML for RSS/Atom
+	atom, err := feed.ToAtom()
+	if err != nil {
+		s.logger.Printf("Error serializing feed to Atom %s: %v", feedURL, err)
+		http.Error(w, "Failed to serialize feed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(atom))
 }
 
 // handleHealth returns JSON health information.
@@ -147,8 +201,6 @@ func (s *Server) cacheCleanerLoop() {
 		}
 	}
 }
-
-// Note: handleFeed is implemented in feed_handler.go within same package.
 
 // osStdout implements io.Writer so we can wrap standard output logger without importing os everywhere.
 type osStdout struct{}

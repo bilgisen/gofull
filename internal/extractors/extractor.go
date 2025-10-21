@@ -1,7 +1,11 @@
 // FILE: internal/extractors/extractor.go
 package extractors
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+)
 
 // Extractor extracts the main content and returns HTML + image URLs.
 // The input can be a URL string or an HTML content string.
@@ -36,4 +40,9 @@ type defaultExtractorStub struct{}
 
 func (defaultExtractorStub) Extract(input any) (string, []string, error) {
 	return "", nil, http.ErrNotSupported
+}
+
+// GenerateUniqueID creates a UUID for RSS items
+func GenerateUniqueID() string {
+	return uuid.New().String()
 }

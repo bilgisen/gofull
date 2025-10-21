@@ -1,4 +1,4 @@
-// internal/app/feed_handler.go (Güncellenmiş Extract çağrıları ve Enclosure hatası düzeltildi)
+// internal/app/feed_handler.go
 package app
 
 import (
@@ -9,26 +9,17 @@ import (
 	"strings"
 	"time"
 
-	// Eksik importlar eklendi
-	"os" // os.Getenv için
-	"go.uber.org/zap" // logger.Log için
-
 	"github.com/gorilla/feeds"
 	"github.com/mmcdole/gofeed"
+	"go.uber.org/zap" // logger.Log.Sugar() ile loglama için eklendi
 
 	"gofull/internal/extractors"
-	"gofull/internal/logger"
+	"gofull/internal/logger" // logger.Log kullanmak için eklendi
 )
-
-// init fonksiyonu artık os importuna sahip
-func init() {
-	logger.InitLogger(os.Getenv("APP_ENV"))
-}
 
 // FeedHandler processes RSS/Atom feeds and rebuilds them with cleaned article content.
 type FeedHandler struct {
 	Client     *http.Client
-	// HATA: Registry.Match metodu yok. ForURL kullanın.
 	Registry   *extractors.Registry
 	Cache      *Cache
 	FeedParser *gofeed.Parser
@@ -36,12 +27,10 @@ type FeedHandler struct {
 
 // ProcessFeed fetches a feed URL, extracts and cleans each item, and returns a unified feed.
 func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
-	// HATA: logger.Log.Info için zap import gerekli
-	logger.Log.Info("Processing feed", zap.String("url", feedURL))
+	logger.Log.Sugar().Info("Processing feed", zap.String("url", feedURL))
 	parsedFeed, err := h.FeedParser.ParseURL(feedURL)
 	if err != nil {
-		// HATA: logger.Log.Error için zap import gerekli
-		logger.Log.Error("Failed to parse feed", zap.String("url", feedURL), zap.Error(err))
+		logger.Log.Sugar().Error("Failed to parse feed", zap.String("url", feedURL), zap.Error(err))
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
 
@@ -56,15 +45,13 @@ func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
 	for _, item := range parsedFeed.Items {
 		processed, err := h.processItem(item)
 		if err != nil {
-			// HATA: logger.Log.Warn için zap import gerekli
-			logger.Log.Warn("Skipping item", zap.String("title", item.Title), zap.Error(err))
+			logger.Log.Sugar().Warn("Skipping item", zap.String("title", item.Title), zap.Error(err))
 			continue
 		}
 		outputFeed.Items = append(outputFeed.Items, processed)
 	}
 
-	// HATA: logger.Log.Info için zap import gerekli
-	logger.Log.Info("Feed processed successfully", zap.Int("items", len(outputFeed.Items)))
+	logger.Log.Sugar().Info("Feed processed successfully", zap.Int("items", len(outputFeed.Items)))
 	return outputFeed, nil
 }
 
@@ -78,26 +65,23 @@ func (h *FeedHandler) processItem(item *gofeed.Item) (*feeds.Item, error) {
 	domainExtractor := h.Registry.ForURL(item.Link)
 
 	var contentHTML string
-	var images []string // []string olarak değiştirildi
+	var images []string
 	var err error
 
 	// Prefer feed content if available (HTML olarak)
 	if item.Content != "" {
-		// item.Content (HTML) ile Extract çağrısı
-		contentHTML, images, err = domainExtractor.Extract(item.Content) // Değiştirildi
+		contentHTML, images, err = domainExtractor.Extract(item.Content)
 	} else {
-		// item.Link (URL) ile Extract çağrısı
-		contentHTML, images, err = domainExtractor.Extract(item.Link) // Değiştirildi
+		contentHTML, images, err = domainExtractor.Extract(item.Link)
 	}
 	if err != nil {
-		// HATA: logger.Log.Error için zap import gerekli
-		logger.Log.Error("Failed to extract content", zap.String("url", item.Link), zap.Error(err))
+		logger.Log.Sugar().Error("Failed to extract content", zap.String("url", item.Link), zap.Error(err))
 		return nil, fmt.Errorf("extract failed: %w", err)
 	}
 
 	// Create a clean item with UUID
 	feedItem := &feeds.Item{
-		Id:          extractors.GenerateUniqueID(),
+		Id:          extractors.GenerateUniqueID(), // Artık tanımlı
 		Title:       item.Title,
 		Link:        &feeds.Link{Href: item.Link},
 		Description: summarizeHTML(contentHTML, 300),
@@ -109,30 +93,17 @@ func (h *FeedHandler) processItem(item *gofeed.Item) (*feeds.Item, error) {
 
 	// Add image if found (ilk resmi al)
 	if len(images) > 0 {
-		// HATA: feeds.Item.Enclosures alanı yok. Doğru alan Enclosure.
-		// feedItem.Enclosures = []*feeds.Enclosure{{Url: image, Type: "image/jpeg"}}
-		feedItem.Enclosure = &feeds.Enclosure{ // Değiştirildi
-			Url:  images[0], // İlk resmi kullan
-			Type: "image/jpeg", // Gerekirse türü dinamik olarak belirleyin
-			// Length belirtmek isterseniz, dosya boyutunu buraya ekleyebilirsiniz.
+		feedItem.Enclosure = &feeds.Enclosure{
+			Url:  images[0],
+			Type: "image/jpeg",
 		}
 	}
 
-	// HATA: logger.Log.Info için zap import gerekli
-	logger.Log.Info("Item processed successfully", zap.String("title", item.Title), zap.String("url", item.Link))
+	logger.Log.Sugar().Info("Item processed successfully", zap.String("title", item.Title), zap.String("url", item.Link))
 	return feedItem, nil
 }
 
 // fetchArticleHTML retrieves the full HTML of an article by URL.
-// Bu fonksiyon artık processItem içinde doğrudan Extract(url) çağrısıyla yerine geçilmiştir.
-// Ancak, hala Registry.ForURL(item.Link) kullanılıyorsa, bu extractor'ın URL ile çalışması beklenir.
-// Yani item.Content yoksa, Extract(item.Link) çağrılır.
-// Bu da DefaultExtractor'ı kullanır (NTVExtractor'ı değil, çünkü domain eşleşmiyorsa Default döner).
-// Bu yapı, item.Content varsa onu HTML olarak işler, yoksa URL'yi işler.
-// fetchArticleHTML fonksiyonu artık gerekli olmayabilir.
-// Ancak, fetchArticleHTML başka bir yerde kullanılıyor olabilir veya
-// Registry ForURL ile uygun extractor'ı döndürmüyor olabilir.
-// Şimdilik, bu fonksiyonu koruyoruz ama processItem içinde doğrudan Extract(url) kullanıyoruz.
 func (h *FeedHandler) fetchArticleHTML(articleURL string) (string, error) {
 	resp, err := h.Client.Get(articleURL)
 	if err != nil {
