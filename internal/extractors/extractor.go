@@ -2,6 +2,7 @@ package extractors
 
 import (
 	"errors"
+	"net/url"
 
 	"github.com/google/uuid"
 )
@@ -16,12 +17,15 @@ type Extractor interface {
 
 // Registry manages registered extractors and a default fallback.
 type Registry struct {
-	defaultExtractor Extractor
+	domainExtractors map[string]Extractor
+	defaultExtractor  Extractor
 }
 
 // NewRegistry creates a new extractor registry.
 func NewRegistry() *Registry {
-	return &Registry{}
+	return &Registry{
+		domainExtractors: make(map[string]Extractor),
+	}
 }
 
 // RegisterDefault sets the default fallback extractor.
@@ -30,12 +34,36 @@ func (r *Registry) RegisterDefault(e Extractor) {
 }
 
 // ForURL returns the best extractor for a given URL.
-// For now, it always returns the default extractor.
-func (r *Registry) ForURL(url string) Extractor {
+// It checks for domain-specific extractors first, then falls back to default.
+func (r *Registry) ForURL(urlStr string) Extractor {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		// If URL parsing fails, return default extractor
+		if r.defaultExtractor != nil {
+			return r.defaultExtractor
+		}
+		return &defaultExtractorStub{}
+	}
+
+	// Check for domain-specific extractor
+	domain := parsedURL.Host
+	if extractor, exists := r.domainExtractors[domain]; exists {
+		return extractor
+	}
+
+	// Fall back to default extractor
 	if r.defaultExtractor != nil {
 		return r.defaultExtractor
 	}
 	return &defaultExtractorStub{}
+}
+
+// RegisterDomain registers an extractor for a specific domain.
+func (r *Registry) RegisterDomain(domain string, extractor Extractor) {
+	if r.domainExtractors == nil {
+		r.domainExtractors = make(map[string]Extractor)
+	}
+	r.domainExtractors[domain] = extractor
 }
 
 // defaultExtractorStub is used when no extractor is registered.

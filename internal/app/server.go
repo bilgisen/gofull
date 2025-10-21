@@ -56,6 +56,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	r := extractors.NewRegistry()
 	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient())) // Değiştirildi
 
+	// Register domain-specific extractors
+	r.RegisterDomain("dunya.com", extractors.NewDunyaExtractor(hc.StandardClient()))
+
 	// FeedHandler oluştur
 	fh := NewFeedHandler(c)
 
