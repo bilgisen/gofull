@@ -16,29 +16,26 @@ import (
 type DefaultExtractor struct {
 	httpClient *http.Client
 	userAgent  string
-	logger     interface{ Printf(...interface{}) }
 }
 
 // NewDefaultExtractor constructs a DefaultExtractor. The httpClient can be nil to use http.DefaultClient.
-// The logger must implement the interface{ Printf(...interface{}) } method, e.g., *zap.SugaredLogger.
-func NewDefaultExtractor(client *http.Client, logger interface{ Printf(...interface{}) }) *DefaultExtractor {
+func NewDefaultExtractor(client *http.Client) *DefaultExtractor {
 	return &DefaultExtractor{
 		httpClient: client,
 		userAgent:  "Mozilla/5.0 (compatible; RSSFullTextBot/1.0)",
-		logger:     logger,
 	}
 }
 
 // Extract implements the extractors.Extractor interface.
 // It expects the input to be a string representing a URL.
 func (d *DefaultExtractor) Extract(input any) (string, []string, error) {
-	// Gelen input'un bir string olup olmadığını kontrol et
+	// Check if input is a string
 	urlStr, ok := input.(string)
 	if !ok {
 		return "", nil, fmt.Errorf("DefaultExtractor: input must be a string (URL), got %T", input)
 	}
 
-	// String geldiğinde, bunu URL olarak değerlendir
+	// Use the string as article URL
 	articleURL := urlStr
 
 	if d.httpClient == nil {
@@ -56,7 +53,6 @@ func (d *DefaultExtractor) Extract(input any) (string, []string, error) {
 	// Fallback: fetch raw HTML and use goquery selectors to try to find main article
 	resp, err := d.httpClient.Get(articleURL)
 	if err != nil {
-		d.logger.Printf("http get failed: %v", err)
 		return "", nil, err
 	}
 	defer resp.Body.Close()
@@ -115,7 +111,22 @@ func wrapAsHTML(text string) string {
 	return fmt.Sprintf(`<div class="gofull-article">%s</div>`, escaped)
 }
 
-func extractImagesFromHTML(_ string) []string {
-	// placeholder: readability's doc.Byline isn't image list; real extraction would parse doc's HTML
-	return nil
+func extractImagesFromHTML(html string) []string {
+	// Basic image extraction from HTML - look for img tags
+	var images []string
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists && src != "" {
+			// Basic validation - skip data URLs and very short strings
+			if !strings.HasPrefix(src, "data:") && len(src) > 5 {
+				images = append(images, src)
+			}
+		}
+	})
+
+	return images
 }

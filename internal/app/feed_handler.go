@@ -1,19 +1,18 @@
-// internal/app/feed_handler.go
 package app
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/feeds"
 	"github.com/mmcdole/gofeed"
-	"go.uber.org/zap" // logger.Log.Sugar() ile loglama için eklendi
+	// "go.uber.org/zap" // logger.Log.Sugar() ile loglama için eklendi
 
 	"gofull/internal/extractors"
-	"gofull/internal/logger" // logger.Log kullanmak için eklendi
+	// "gofull/internal/logger" // logger.Log kullanmak için eklendi
 )
 
 // FeedHandler processes RSS/Atom feeds and rebuilds them with cleaned article content.
@@ -26,16 +25,13 @@ type FeedHandler struct {
 
 // ProcessFeed fetches a feed URL, extracts and cleans each item, and returns a unified feed.
 func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
-	logger.Log.Sugar().Info("Processing feed", zap.String("url", feedURL)) // Artık global logger.Log başlatılmış olmalı
 	parsedFeed, err := h.FeedParser.ParseURL(feedURL)
 	if err != nil {
-		logger.Log.Sugar().Error("Failed to parse feed", zap.String("url", feedURL), zap.Error(err))
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
 
 	// Nil check for parsedFeed
 	if parsedFeed == nil {
-		logger.Log.Sugar().Error("Parsed feed is nil", zap.String("url", feedURL))
 		return nil, fmt.Errorf("parsed feed is nil")
 	}
 
@@ -48,13 +44,11 @@ func (h *FeedHandler) ProcessFeed(feedURL string) (*feeds.Feed, error) {
 	for _, item := range parsedFeed.Items {
 		processed, err := h.processItem(item)
 		if err != nil {
-			logger.Log.Sugar().Warn("Skipping item", zap.String("title", item.Title), zap.Error(err))
 			continue
 		}
 		outputFeed.Items = append(outputFeed.Items, processed)
 	}
 
-	logger.Log.Sugar().Info("Feed processed successfully", zap.Int("items", len(outputFeed.Items)))
 	return outputFeed, nil
 }
 
@@ -64,37 +58,54 @@ func (h *FeedHandler) processItem(item *gofeed.Item) (*feeds.Item, error) {
 		return nil, fmt.Errorf("item missing link")
 	}
 
-	// Extractor, item.Link'e göre seçilir (domain bazlı)
+	// Get extractor based on item link (domain-based selection)
 	domainExtractor := h.Registry.ForURL(item.Link)
 
 	var contentHTML string
 	var images []string
 	var err error
 
-	// Prefer feed content if available (HTML olarak)
+	// Prefer feed content if available (as HTML)
 	if item.Content != "" {
 		contentHTML, images, err = domainExtractor.Extract(item.Content)
 	} else {
 		contentHTML, images, err = domainExtractor.Extract(item.Link)
 	}
 	if err != nil {
-		logger.Log.Sugar().Error("Failed to extract content", zap.String("url", item.Link), zap.Error(err))
 		return nil, fmt.Errorf("extract failed: %w", err)
 	}
 
 	// Create a clean item with UUID
 	feedItem := &feeds.Item{
-		Id:          extractors.GenerateUniqueID(), // Artık tanımlı
+		Id:          extractors.GenerateUniqueID(),
 		Title:       item.Title,
 		Link:        &feeds.Link{Href: item.Link},
 		Description: summarizeHTML(contentHTML, 300),
-		Created:     *item.PublishedParsed,
-		Updated:     *item.UpdatedParsed,
-		Author:      &feeds.Author{Name: item.Author.Name},
 		Content:     contentHTML,
 	}
 
-	// Add image if found (ilk resmi al)
+	// Set created time if available
+	if item.PublishedParsed != nil {
+		feedItem.Created = *item.PublishedParsed
+	} else {
+		feedItem.Created = time.Now()
+	}
+
+	// Set updated time if available
+	if item.UpdatedParsed != nil {
+		feedItem.Updated = *item.UpdatedParsed
+	} else if item.PublishedParsed != nil {
+		feedItem.Updated = *item.PublishedParsed
+	} else {
+		feedItem.Updated = time.Now()
+	}
+
+	// Add author if available
+	if item.Author != nil && item.Author.Name != "" {
+		feedItem.Author = &feeds.Author{Name: item.Author.Name}
+	}
+
+	// Add image if found (first image)
 	if len(images) > 0 {
 		feedItem.Enclosure = &feeds.Enclosure{
 			Url:  images[0],
@@ -102,31 +113,10 @@ func (h *FeedHandler) processItem(item *gofeed.Item) (*feeds.Item, error) {
 		}
 	}
 
-	logger.Log.Sugar().Info("Item processed successfully", zap.String("title", item.Title), zap.String("url", item.Link))
 	return feedItem, nil
 }
 
-// fetchArticleHTML retrieves the full HTML of an article by URL.
-func (h *FeedHandler) fetchArticleHTML(articleURL string) (string, error) {
-	resp, err := h.Client.Get(articleURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("non-200 response: %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(bodyBytes), nil
-}
-
-// summarizeHTML trims the HTML content to a short text summary.
+// summarizeHTML creates a text summary from HTML content by stripping tags and limiting length.
 func summarizeHTML(html string, limit int) string {
 	plain := stripTags(html)
 	if len(plain) > limit {
@@ -143,17 +133,4 @@ func stripTags(input string) string {
 		text = strings.ReplaceAll(text, tag, "")
 	}
 	return strings.TrimSpace(text)
-}
-
-// normalizeURL ensures URLs are absolute.
-func normalizeURL(baseURL, href string) string {
-	parsedBase, err := url.Parse(baseURL)
-	if err != nil {
-		return href
-	}
-	parsedHref, err := url.Parse(href)
-	if err != nil {
-		return href
-	}
-	return parsedBase.ResolveReference(parsedHref).String()
 }
