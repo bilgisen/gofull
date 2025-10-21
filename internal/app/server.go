@@ -1,10 +1,7 @@
-// FILE: internal/app/server.go
 package app
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -12,7 +9,6 @@ import (
 
 	"gofull/internal/extractors"
 	"gofull/internal/fetch"
-	// "gofull/internal/logger" // logger.Log ve logger.InitLogger için eklendi
 )
 
 // Config holds runtime settings for the server.
@@ -60,14 +56,12 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	// init extractors registry and register default extractor
 	r := extractors.NewRegistry()
-	// HATA: hc.StandardClient() kullan
-	// HATA: logger wrapper kullan
 	r.RegisterDefault(extractors.NewDefaultExtractor(hc.StandardClient())) // Değiştirildi
 
 	// FeedHandler oluştur
 	fp := gofeed.NewParser()
 	fh := &FeedHandler{
-		Client:     hc.StandardClient(), // fetch.Client değil, *http.Client -> fetch.Client.StandardClient() metodu ile al
+		Client:     hc.StandardClient(),
 		Registry:   r,
 		Cache:      c,
 		FeedParser: fp,
@@ -79,7 +73,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cache:       c,
 		httpClient:  hc,
 		extractors:  r,
-		feedHandler: fh, // Eklendi
+		feedHandler: fh,
 		mux:         http.NewServeMux(),
 		shutdown:    make(chan struct{}),
 	}
@@ -108,7 +102,7 @@ func (s *Server) Run(addr string) error {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/", s.handleHome)
-	s.mux.HandleFunc("/feed", s.handleFeed) // handleFeed metodu artık var
+	s.mux.HandleFunc("/feed", s.handleFeed)
 	s.mux.HandleFunc("/health", s.handleHealth)
 }
 

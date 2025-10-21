@@ -8,10 +8,8 @@ import (
 
 	"github.com/gorilla/feeds"
 	"github.com/mmcdole/gofeed"
-	// "go.uber.org/zap" // logger.Log.Sugar() ile loglama için eklendi
 
 	"gofull/internal/extractors"
-	// "gofull/internal/logger" // logger.Log kullanmak için eklendi
 )
 
 // FeedHandler processes RSS/Atom feeds and rebuilds them with cleaned article content.
