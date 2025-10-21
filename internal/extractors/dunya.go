@@ -103,7 +103,7 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 	})
 
 	// Get the HTML content
-	htmlContent, err := contentDiv.Html()
+	htmlContent, err = contentDiv.Html()
 	if err != nil {
 		return "", nil, err
 	}
