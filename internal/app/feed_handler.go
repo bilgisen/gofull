@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +32,16 @@ func NewFeedHandler(cache *Cache, client *http.Client, registry *extractors.Regi
 		Client:   client, // retryablehttp.NewClient().StandardClient() gibi bir şey olabilir
 		Registry: registry,
 	}
+}
+
+// Item represents a single feed item with content and image.
+type Item struct {
+	Title       string `json:"title"`
+	Link        string `json:"link"`
+	Published   string `json:"published"`
+	Description string `json:"description,omitempty"`
+	Content     string `json:"content,omitempty"`
+	Image       string `json:"image,omitempty"` // Yeni alan
 }
 
 // ServeHTTP implements http.Handler for FeedHandler.
@@ -87,16 +96,7 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process each entry content
-	type Item struct {
-		Title       string `json:"title"`
-		Link        string `json:"link"`
-		Published   string `json:"published"`
-		Description string `json:"description,omitempty"`
-		Content     string `json:"content,omitempty"`
-		Image       string `json:"image,omitempty"` // Yeni alan
-	}
-
-	var items []Item
+	var items []Item // Item tipi burada kullanılıyor
 	for _, i := range feed.Items {
 		// processItem fonksiyonunu çağır
 		item := h.processItem(i)
@@ -124,7 +124,7 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // processItem extracts content and image using registered extractors.
-func (h *FeedHandler) processItem(i *gofeed.Item) Item {
+func (h *FeedHandler) processItem(i *gofeed.Item) Item { // Item tipi burada döndürülüyor
 	content := i.Content
 	imageURL := "" // Varsayılan olarak boş
 
@@ -157,7 +157,7 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 		}
 	}
 
-	return Item{
+	return Item{ // Item tipi burada oluşturuluyor
 		Title:       i.Title,
 		Link:        i.Link,
 		Published:   formatTime(i.PublishedParsed),
