@@ -1,132 +1,150 @@
-// FILE: internal/extractors/default.go
 package extractors
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/go-shiori/go-readability"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/go-shiori/go-readability"
 )
 
-// DefaultExtractor uses go-readability and goquery fallback to extract content.
+// DefaultExtractor uses go-readability primarily and goquery as a fallback.
 type DefaultExtractor struct {
 	httpClient *http.Client
 	userAgent  string
 }
 
-// NewDefaultExtractor constructs a DefaultExtractor. The httpClient can be nil to use http.DefaultClient.
+// NewDefaultExtractor constructs a DefaultExtractor.
+// If client is nil, http.DefaultClient is used.
 func NewDefaultExtractor(client *http.Client) *DefaultExtractor {
+	if client == nil {
+		client = &http.Client{
+			Timeout: 15 * time.Second,
+		}
+	}
 	return &DefaultExtractor{
 		httpClient: client,
-		userAgent:  "Mozilla/5.0 (compatible; RSSFullTextBot/1.0)",
+		userAgent:  "Mozilla/5.0 (compatible; GoFullFeedBot/1.1; +https://gofull.app/bot)",
 	}
 }
 
-// Extract implements the extractors.Extractor interface.
-// It expects the input to be a string representing a URL.
+// Extract tries to extract readable HTML and image URLs from a URL or raw HTML string.
 func (d *DefaultExtractor) Extract(input any) (string, []string, error) {
-	// Check if input is a string
-	urlStr, ok := input.(string)
-	if !ok {
-		return "", nil, fmt.Errorf("DefaultExtractor: input must be a string (URL), got %T", input)
-	}
+	switch v := input.(type) {
 
-	// Use the string as article URL
-	articleURL := urlStr
+	case string:
+		// Assume it's a URL
+		return d.extractFromURL(v)
 
-	if d.httpClient == nil {
-		d.httpClient = http.DefaultClient
-	}
-
-	// First try go-readability (it fetches itself internally)
-	if doc, err := readability.FromURL(articleURL, 15*time.Second); err == nil {
-		content := strings.TrimSpace(doc.TextContent)
-		if content != "" {
-			return wrapAsHTML(content), extractImagesFromHTML(doc.Byline), nil
+	case map[string]string:
+		// Expecting {"html": "<raw html>"}
+		if html, ok := v["html"]; ok {
+			return d.extractFromHTML(html)
 		}
+		return "", nil, errors.New("missing 'html' key in input map")
+
+	default:
+		return "", nil, fmt.Errorf("unsupported input type %T", input)
+	}
+}
+
+func (d *DefaultExtractor) extractFromURL(articleURL string) (string, []string, error) {
+	// First: try go-readability
+	doc, err := readability.FromURL(articleURL, 15*time.Second)
+	if err == nil && strings.TrimSpace(doc.Content) != "" {
+		imgs := extractImagesFromHTML(doc.Content)
+		return sanitizeHTML(doc.Content), imgs, nil
 	}
 
-	// Fallback: fetch raw HTML and use goquery selectors to try to find main article
-	resp, err := d.httpClient.Get(articleURL)
+	// Second: manual fetch and goquery fallback
+	req, err := http.NewRequestWithContext(context.Background(), "GET", articleURL, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	req.Header.Set("User-Agent", d.userAgent)
+
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", nil, fmt.Errorf("status %d", resp.StatusCode)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
 	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, err
 	}
-	bodyStr := string(bodyBytes)
-	// try to parse and find common article containers
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyStr))
+	return d.extractFromHTML(string(bodyBytes))
+}
+
+// extractFromHTML attempts to find the main article container in a raw HTML string.
+func (d *DefaultExtractor) extractFromHTML(body string) (string, []string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
 		return "", nil, err
 	}
 
-	// heuristics: try common article selectors
-	candidates := []string{"article", ".article-body", ".content", ".news-detail__content", ".story-body"}
-	var foundHTML string
-	for _, sel := range candidates {
-		if sel == "article" {
-			if s := doc.Find("article").First(); s.Length() > 0 {
-				// remove scripts/iframes/ads
-				s.Find("script, iframe, .ad, .advertisement, .social-share, .related-news").Remove()
-				htmlStr, _ := s.Html()
-				foundHTML = strings.TrimSpace(htmlStr)
-				break
-			}
-		} else {
-			if s := doc.Find(sel).First(); s.Length() > 0 {
-				s.Find("script, iframe, .ad, .advertisement, .social-share, .related-news").Remove()
-				htmlStr, _ := s.Html()
-				foundHTML = strings.TrimSpace(htmlStr)
-				break
+	// Try common containers
+	selectors := []string{
+		"article",
+		"main",
+		".article-body",
+		".post-content",
+		".entry-content",
+		".content",
+		".news-detail__content",
+		".story-body",
+	}
+
+	for _, sel := range selectors {
+		if s := doc.Find(sel).First(); s.Length() > 0 {
+			s.Find("script, iframe, style, .ad, .advertisement, .promo, .related, .share").Remove()
+			htmlStr, _ := s.Html()
+			htmlStr = sanitizeHTML(htmlStr)
+			if htmlStr != "" {
+				imgs := extractImagesFromHTML(htmlStr)
+				return htmlStr, imgs, nil
 			}
 		}
 	}
 
-	if foundHTML != "" {
-		imgs := []string{}
-		doc.Find("img").Each(func(i int, s *goquery.Selection) {
-			if src, ok := s.Attr("src"); ok {
-				imgs = append(imgs, src)
-			}
-		})
-		return foundHTML, imgs, nil
+	return "", nil, errors.New("no main article content found")
+}
+
+// sanitizeHTML ensures consistent wrapping and line breaks.
+func sanitizeHTML(html string) string {
+	html = strings.TrimSpace(html)
+	if html == "" {
+		return ""
 	}
-
-	return "", nil, fmt.Errorf("no extractor matched")
+	if !strings.HasPrefix(html, "<div") {
+		html = fmt.Sprintf(`<div class="gofull-article">%s</div>`, html)
+	}
+	return html
 }
 
-func wrapAsHTML(text string) string {
-	// wrap plain text into a simple HTML container
-	escaped := strings.ReplaceAll(text, "\n", "<br>\n")
-	return fmt.Sprintf(`<div class="gofull-article">%s</div>`, escaped)
-}
-
+// extractImagesFromHTML collects all non-empty <img src="..."> values.
 func extractImagesFromHTML(html string) []string {
-	// Basic image extraction from HTML - look for img tags
 	var images []string
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil
 	}
 
-	doc.Find("img").Each(func(i int, s *goquery.Selection) {
-		if src, exists := s.Attr("src"); exists && src != "" {
-			// Basic validation - skip data URLs and very short strings
-			if !strings.HasPrefix(src, "data:") && len(src) > 5 {
+	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
+		if src, ok := s.Attr("src"); ok && src != "" {
+			if !strings.HasPrefix(src, "data:") && len(src) > 6 {
 				images = append(images, src)
 			}
 		}
 	})
-
 	return images
 }
