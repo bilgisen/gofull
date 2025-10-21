@@ -174,3 +174,27 @@ func formatTime(t *time.Time) string {
 	}
 	return t.Format(time.RFC3339)
 }
+
+// cleanHTMLContent removes unwanted HTML tags and cleans up the content
+func cleanHTMLContent(html string) string {
+	// Basic cleaning - remove script and style tags
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return html // Return original if parsing fails
+	}
+
+	// Remove script and style elements
+	doc.Find("script, style").Remove()
+
+	// Get the cleaned HTML
+	cleaned, err := doc.Html()
+	if err != nil {
+		return html // Return original if getting HTML fails
+	}
+
+	// Remove extra whitespace and newlines
+	cleaned = strings.TrimSpace(cleaned)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	return cleaned
+}
