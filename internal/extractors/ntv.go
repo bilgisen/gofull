@@ -1,6 +1,7 @@
 package extractors
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,10 +30,33 @@ func NewNTVExtractor(client *http.Client) *NTVExtractor {
 func (e *NTVExtractor) Extract(input any) (string, []string, error) {
 	switch v := input.(type) {
 	case string:
+		// Input is a URL, fetch and extract content
 		return e.extractFromURL(v)
+
+	case map[string]string:
+		// Handle map[string]string with "html" key
+		if htmlContent, ok := v["html"]; ok {
+			return e.extractFromHTML(strings.NewReader(htmlContent))
+		}
+
+	case map[string]interface{}:
+		// Handle map[string]interface{} with "html" key
+		if htmlContent, ok := v["html"].(string); ok {
+			return e.extractFromHTML(strings.NewReader(htmlContent))
+		}
+		// If no html key, try to get URL from common fields
+		if url, ok := v["url"].(string); ok && url != "" {
+			return e.extractFromURL(url)
+		}
+		if link, ok := v["link"].(string); ok && link != "" {
+			return e.extractFromURL(link)
+		}
+
 	default:
 		return "", nil, fmt.Errorf("unsupported input type: %T", input)
 	}
+
+	return "", nil, errors.New("invalid input format - expected URL or map with 'html' content")
 }
 
 // extractFromURL fetches the URL and extracts content.

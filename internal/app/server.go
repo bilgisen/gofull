@@ -54,10 +54,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	extractorReg.RegisterDomain("www.ntv.com.tr", ntvExt)
 	extractorReg.RegisterDomain("ntv.com.tr", ntvExt)
 
-	// Register AA extractor
-	aaExt := extractors.NewAAExtractor(nil)
-	extractorReg.RegisterDomain("www.aa.com.tr", aaExt)
-	extractorReg.RegisterDomain("aa.com.tr", aaExt)
 
 	extractorReg.RegisterDomain("www.cnbce.com", cnbceExt)
 	extractorReg.RegisterDomain("cnbce.com", cnbceExt)

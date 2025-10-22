@@ -40,19 +40,33 @@ func NewDefaultExtractor(client *http.Client) *DefaultExtractor {
 func (d *DefaultExtractor) Extract(input any) (string, []string, error) {
 	switch v := input.(type) {
 	case string:
-		// Assume it's a URL
+		// Handle string URL
 		return d.extractFromURL(v)
 
 	case map[string]string:
-		// Expecting {"html": "<raw html>"}
+		// Handle map[string]string with "html" key
 		if htmlContent, ok := v["html"]; ok {
 			return d.extractFromHTML(htmlContent)
 		}
-		return "", nil, errors.New("missing 'html' key in input map")
+
+	case map[string]interface{}:
+		// Handle map[string]interface{} with "html" key
+		if htmlContent, ok := v["html"].(string); ok {
+			return d.extractFromHTML(htmlContent)
+		}
+		// If no html key, try to get URL from common fields
+		if url, ok := v["url"].(string); ok && url != "" {
+			return d.extractFromURL(url)
+		}
+		if link, ok := v["link"].(string); ok && link != "" {
+			return d.extractFromURL(link)
+		}
 
 	default:
-		return "", nil, fmt.Errorf("unsupported input type %T", input)
+		return "", nil, fmt.Errorf("unsupported input type: %T", input)
 	}
+
+	return "", nil, errors.New("invalid input format - expected URL or map with 'html' content")
 }
 
 func (d *DefaultExtractor) extractFromURL(articleURL string) (string, []string, error) {

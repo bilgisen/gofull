@@ -1,6 +1,7 @@
 package extractors
 
 import (
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -36,15 +37,31 @@ func (d *DunyaExtractor) Extract(input any) (string, []string, error) {
 	case string:
 		// Input is a URL, fetch and extract content (no prefix check)
 		return d.extractFromURL(v)
+
 	case map[string]string:
-		// Input is HTML content
+		// Handle map[string]string with "html" key
 		if htmlContent, ok := v["html"]; ok {
 			return d.extractFromHTML(htmlContent)
 		}
-		return "", nil, fmt.Errorf("missing 'html' key in input map")
+
+	case map[string]interface{}:
+		// Handle map[string]interface{} with "html" key
+		if htmlContent, ok := v["html"].(string); ok {
+			return d.extractFromHTML(htmlContent)
+		}
+		// If no html key, try to get URL from common fields
+		if url, ok := v["url"].(string); ok && url != "" {
+			return d.extractFromURL(url)
+		}
+		if link, ok := v["link"].(string); ok && link != "" {
+			return d.extractFromURL(link)
+		}
+
 	default:
-		return "", nil, fmt.Errorf("unsupported input type %T", input)
+		return "", nil, fmt.Errorf("unsupported input type: %T", input)
 	}
+
+	return "", nil, errors.New("invalid input format - expected URL or map with 'html' content")
 }
 
 // extractFromURL fetches the URL and extracts content.

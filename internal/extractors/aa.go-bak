@@ -1,0 +1,214 @@
+package extractors
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/PuerkitoBio/goquery"
+)
+
+// AAExtractor handles content extraction for aa.com.tr domain.
+// It processes article URLs on the domain.
+type AAExtractor struct {
+	httpClient *http.Client
+	userAgent  string
+}
+
+// NewAAExtractor creates a new AAExtractor
+func NewAAExtractor() (*AAExtractor, error) {
+	return &AAExtractor{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	}, nil
+}
+
+// Extract implements the Extractor interface for aa.com.tr URLs.
+func (e *AAExtractor) Extract(input any) (string, []string, error) {
+	switch v := input.(type) {
+	case string:
+		return e.extractFromURL(v)
+	case map[string]any:
+		var url string
+		var images []string
+		
+		if link, ok := v["link"].(string); ok && link != "" {
+			url = link
+		} else if urlVal, ok := v["url"].(string); ok && urlVal != "" {
+			url = urlVal
+		} else {
+			return "", nil, fmt.Errorf("no URL found in input map")
+		}
+		
+		content, extractedImages, err := e.extractFromURL(url)
+		if err != nil {
+			return "", nil, err
+		}
+		
+		if img, ok := v["image"].(string); ok && img != "" {
+			images = append(images, img)
+			aaLogo := "cdnassets.aa.com.tr"
+			for _, extractedImg := range extractedImages {
+				if !strings.Contains(extractedImg, aaLogo) {
+					images = append(images, extractedImg)
+				}
+			}
+		} else if len(extractedImages) > 0 {
+			images = extractedImages
+		}
+		
+		return content, images, nil
+		
+	default:
+		return "", nil, fmt.Errorf("unsupported input type: %T", input)
+	}
+}
+
+// extractFromURL fetches the URL and extracts content using HTTP requests.
+func (e *AAExtractor) extractFromURL(url string) (string, []string, error) {
+	log.Printf("Starting extraction from URL: %s", url)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create request: %v", err)
+	}
+	
+	req.Header.Set("User-Agent", e.userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to fetch URL: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse HTML: %v", err)
+	}
+
+	content := e.extractContent(doc)
+	if content == "" {
+		return "", nil, fmt.Errorf("failed to extract content from URL: %s", url)
+	}
+
+	images := e.extractImages(doc)
+
+	return content, images, nil
+}
+
+// extractContent extracts the main content from the document
+func (e *AAExtractor) extractContent(doc *goquery.Document) string {
+	selectors := []string{
+		".content-detay",
+		".content",
+		"article",
+		"main",
+	}
+
+	var content string
+	for _, selector := range selectors {
+		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+			s.Find("script, style, iframe, noscript, .ad, .advertisement, .social-share, .related-news").Remove()
+			text := strings.TrimSpace(s.Text())
+			if text != "" {
+				content += "\n" + text
+			}
+		})
+		
+		if content != "" {
+			break
+		}
+	}
+
+	content = strings.TrimSpace(content)
+	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
+	
+	return content
+}
+
+// extractImages extracts image URLs from the document
+func (e *AAExtractor) extractImages(doc *goquery.Document) []string {
+	var images []string
+	
+	// Extract from meta tags first
+	metaImages := e.extractImagesFromMeta(doc)
+	images = append(images, metaImages...)
+	
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists {
+			src = strings.TrimSpace(src)
+			if src != "" && !strings.HasPrefix(src, "data:") {
+				images = append(images, src)
+			}
+		}
+		
+		if src, exists := s.Attr("data-src"); exists {
+			src = strings.TrimSpace(src)
+			if src != "" && !strings.HasPrefix(src, "data:") {
+				images = append(images, src)
+			}
+		}
+	})
+	
+	return uniqueStrings(images)
+}
+
+// extractImagesFromMeta extracts image URLs from Open Graph and Twitter Card meta tags.
+func (e *AAExtractor) extractImagesFromMeta(doc *goquery.Document) []string {
+	var images []string
+
+	addImage := func(url string) {
+		if url == "" {
+			return
+		}
+
+		if !strings.HasPrefix(url, "http") && !strings.HasPrefix(url, "//") {
+			url = "https://www.aa.com.tr" + url
+		}
+
+		for _, img := range images {
+			if img == url {
+				return
+			}
+		}
+
+		images = append(images, url)
+	}
+
+	doc.Find("meta[property='og:image']").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("content"); exists {
+			addImage(src)
+		}
+	})
+
+	doc.Find("meta[name='twitter:image']").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("content"); exists {
+			addImage(src)
+		}
+	})
+
+	return images
+}
+
+// uniqueStrings removes duplicate strings from a slice
+func uniqueStrings(slice []string) []string {
+	keys := make(map[string]bool)
+	list := []string{}
+	for _, entry := range slice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
