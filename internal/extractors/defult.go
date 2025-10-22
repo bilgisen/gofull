@@ -1,9 +1,11 @@
+// internal/extractors/default.go
 package extractors
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -37,15 +39,14 @@ func NewDefaultExtractor(client *http.Client) *DefaultExtractor {
 // Extract tries to extract readable HTML and image URLs from a URL or raw HTML string.
 func (d *DefaultExtractor) Extract(input any) (string, []string, error) {
 	switch v := input.(type) {
-
 	case string:
 		// Assume it's a URL
 		return d.extractFromURL(v)
 
 	case map[string]string:
 		// Expecting {"html": "<raw html>"}
-		if html, ok := v["html"]; ok {
-			return d.extractFromHTML(html)
+		if htmlContent, ok := v["html"]; ok {
+			return d.extractFromHTML(htmlContent)
 		}
 		return "", nil, errors.New("missing 'html' key in input map")
 
@@ -102,116 +103,186 @@ func (d *DefaultExtractor) extractFromHTMLWithBase(body, baseURL string) (string
 		return "", nil, err
 	}
 
-	// Try common containers
-	selectors := []string{
-		"article",
-		"main",
-		".article-body",
-		".post-content",
-		".entry-content",
-		".content",
-		".news-detail__content",
-		".story-body",
+	// First, try to get the main image from meta tags (most reliable)
+	var images []string
+
+	// Try to get the main image from meta tags in order of preference
+	metaSelectors := []struct {
+		selector string
+		attr     string
+	}{
+		{`meta[property="og:image"]`, "content"},
+		{`meta[name="twitter:image"]`, "content"},
+		{`link[rel="image_src"]`, "href"},
+		{`meta[property="og:image:url"]`, "content"},
+		{`meta[name="twitter:image:src"]`, "content"},
+		{`meta[property="og:image:secure_url"]`, "content"},
 	}
 
-	for _, sel := range selectors {
-		if s := doc.Find(sel).First(); s.Length() > 0 {
-			s.Find("script, iframe, style, .ad, .advertisement, .promo, .related, .share").Remove()
-			htmlStr, _ := s.Html()
-			htmlStr = sanitizeHTML(htmlStr)
-			if htmlStr != "" {
-				// Try to get meta tag images first, then fall back to content images
-				imgs := extractImagesFromMetaTags(body)
-				if len(imgs) == 0 {
-					imgs = extractImagesFromHTMLWithBase(htmlStr, baseURL)
-				}
-				return htmlStr, imgs, nil
+	for _, meta := range metaSelectors {
+		if img, exists := doc.Find(meta.selector).First().Attr(meta.attr); exists && img != "" {
+			img = strings.TrimSpace(img)
+			if img != "" {
+				images = []string{img} // We found our main image
+				break
 			}
 		}
 	}
 
-	return "", nil, errors.New("no main article content found")
-}
-
-// sanitizeHTML ensures consistent wrapping and line breaks.
-func sanitizeHTML(html string) string {
-	html = strings.TrimSpace(html)
-	if html == "" {
-		return ""
-	}
-	if !strings.HasPrefix(html, "<div") {
-		html = fmt.Sprintf(`<div class="gofull-article">%s</div>`, html)
-	}
-	return html
-}
-
-// extractImagesFromMetaTags extracts image URLs from Open Graph and Twitter Card meta tags.
-func extractImagesFromMetaTags(html string) []string {
-	var images []string
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil
-	}
-
-	// Open Graph image
-	if ogImage, exists := doc.Find(`meta[property="og:image"]`).Attr("content"); exists && ogImage != "" {
-		images = append(images, ogImage)
-	}
-
-	// Twitter Card image
-	if twitterImage, exists := doc.Find(`meta[name="twitter:image"]`).Attr("content"); exists && twitterImage != "" {
-		images = append(images, twitterImage)
-	}
-
-	// Article image (schema.org)
-	if articleImage, exists := doc.Find(`meta[property="article:image"]`).Attr("content"); exists && articleImage != "" {
-		images = append(images, articleImage)
-	}
-
-	return images
-}
-
-// extractImagesFromHTMLWithBase collects all non-empty <img src="..."> values.
-func extractImagesFromHTMLWithBase(html, baseURL string) []string {
-	var images []string
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil
-	}
-
-	doc.Find("img").Each(func(_ int, s *goquery.Selection) {
-		if src, ok := s.Attr("src"); ok && src != "" {
-			// Skip data URLs and very short URLs
-			if strings.HasPrefix(src, "data:") || len(src) < 6 {
-				return
-			}
-
-			// Convert relative URLs to absolute URLs
-			if !strings.HasPrefix(src, "http") {
-				// Handle protocol-relative URLs (//example.com/image.jpg)
-				if strings.HasPrefix(src, "//") {
-					images = append(images, "https:"+src)
+	// If no meta tag image found, try to find it in the content
+	if len(images) == 0 {
+		// Look for figure with post-image class first, then other common patterns
+		// Add cnbce.com specific selectors
+		selectors := "figure.post-image img, .post-image img, figure img, img, .article-image img, .entry-thumbnail img, .wp-post-image, .post-thumbnail img, .article-header-image img, .featured-image img, .post-featured-image img, .td-post-featured-image img"
+		
+		doc.Find(selectors).Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && src != "" {
+				src = strings.TrimSpace(src)
+				if src == "" {
 					return
 				}
 
-				// Handle relative URLs
-				if strings.HasPrefix(src, "/") {
-					// Absolute path from domain root
-					if parsedURL, err := url.Parse(baseURL); err == nil {
-						images = append(images, parsedURL.Scheme+"://"+parsedURL.Host+src)
-					}
-				} else {
-					// Relative path - combine with base URL path
-					if parsedURL, err := url.Parse(baseURL); err == nil {
-						baseDir := strings.TrimSuffix(parsedURL.Path, "/")
-						fullURL := baseDir + "/" + strings.TrimPrefix(src, "./")
-						images = append(images, parsedURL.Scheme+"://"+parsedURL.Host+fullURL)
+				// Handle different URL formats
+				if strings.HasPrefix(src, "//") {
+					src = "https:" + src
+				} else if !strings.HasPrefix(src, "http") {
+					if baseURL != "" {
+						base, err := url.Parse(baseURL)
+						if err == nil {
+							src = base.Scheme + "://" + base.Host + "/" + strings.TrimLeft(src, "/")
+						}
+					} else {
+						src = "https://" + strings.TrimLeft(src, "/")
 					}
 				}
-			} else {
+
+				// Skip small images and icons
+				lowerSrc := strings.ToLower(src)
+				if !strings.HasSuffix(lowerSrc, ".svg") &&
+					!strings.Contains(lowerSrc, "icon") &&
+					!strings.Contains(lowerSrc, "logo") &&
+					!contains(images, src) {
+					images = append(images, src)
+				}
+			}
+		})
+	}
+
+	// Get the main content
+	contentDiv := doc.Find(`article, main, [role="main"], [itemprop="articleBody"], .post-content, .entry-content, .article-content, .content, body`).First()
+
+	// Clean up the content
+	content, err := contentDiv.Html()
+	if err != nil {
+		return "", images, fmt.Errorf("error getting HTML content: %v", err)
+	}
+
+	// Clean up the content
+	content = strings.TrimSpace(html.UnescapeString(content))
+
+	return content, images, nil
+}
+
+// sanitizeHTML ensures consistent wrapping and line breaks.
+func sanitizeHTML(htmlContent string) string {
+	htmlContent = strings.TrimSpace(htmlContent)
+	if htmlContent == "" {
+		return ""
+	}
+	if !strings.HasPrefix(htmlContent, "<div") {
+		htmlContent = fmt.Sprintf(`<div class="gofull-article">%s</div>`, htmlContent)
+	}
+	return htmlContent
+}
+
+// extractImagesFromMetaTags extracts image URLs from Open Graph and Twitter Card meta tags.
+func extractImagesFromMetaTags(htmlContent string) []string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil
+	}
+
+	var urls []string
+
+	// Check common meta tags for images
+	metaSelectors := []struct {
+		selector string
+		attr     string
+	}{
+		{`meta[property="og:image"]`, "content"},
+		{`meta[name="twitter:image"]`, "content"},
+		{`link[rel="image_src"]`, "href"},
+		{`meta[property="og:image:url"]`, "content"},
+		{`meta[name="twitter:image:src"]`, "content"},
+		{`meta[property="og:image:secure_url"]`, "content"},
+		{`meta[name="thumbnail"]`, "content"},
+		{`meta[itemprop="image"]`, "content"},
+	}
+
+	for _, meta := range metaSelectors {
+		if img, exists := doc.Find(meta.selector).First().Attr(meta.attr); exists && img != "" {
+			img = strings.TrimSpace(img)
+			if img != "" && !contains(urls, img) {
+				urls = append(urls, img)
+			}
+		}
+	}
+
+	return urls
+}
+
+// extractImagesFromHTMLWithBase collects all non-empty <img src="..."> values.
+func extractImagesFromHTMLWithBase(htmlContent, baseURL string) []string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil
+	}
+
+	var images []string
+
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists && src != "" {
+			src = strings.TrimSpace(src)
+			if src == "" {
+				return
+			}
+
+			// Handle protocol-relative URLs
+			if strings.HasPrefix(src, "//") {
+				src = "https:" + src
+			} else if baseURL != "" && !strings.HasPrefix(src, "http") {
+				// Handle relative URLs if baseURL is provided
+				base, err := url.Parse(baseURL)
+				if err == nil {
+					// Create absolute URL from relative path
+					if strings.HasPrefix(src, "/") {
+						// Absolute path
+						src = base.Scheme + "://" + base.Host + src
+					} else {
+						// Relative path
+						basePath := base.Path
+						if !strings.HasSuffix(basePath, "/") {
+							// Remove filename from base path
+							lastSlash := strings.LastIndex(basePath, "/")
+							if lastSlash >= 0 {
+								basePath = basePath[:lastSlash+1]
+							}
+						}
+						src = base.Scheme + "://" + base.Host + basePath + src
+					}
+				}
+			}
+
+			// Skip small images and icons
+			lowerSrc := strings.ToLower(src)
+			if !strings.HasSuffix(lowerSrc, ".svg") &&
+				!strings.Contains(lowerSrc, "icon") &&
+				!strings.Contains(lowerSrc, "logo") &&
+				!contains(images, src) {
 				images = append(images, src)
 			}
 		}
 	})
+
 	return images
 }

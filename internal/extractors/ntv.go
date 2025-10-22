@@ -1,0 +1,158 @@
+package extractors
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+)
+
+// NTVExtractor handles content extraction for ntv.com.tr domain.
+// It processes article URLs on the domain.
+type NTVExtractor struct {
+	httpClient *http.Client
+}
+
+// NewNTVExtractor creates a new NTVExtractor.
+func NewNTVExtractor(client *http.Client) *NTVExtractor {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &NTVExtractor{
+		httpClient: client,
+	}
+}
+
+// Extract implements the Extractor interface for ntv.com.tr URLs.
+func (e *NTVExtractor) Extract(input any) (string, []string, error) {
+	switch v := input.(type) {
+	case string:
+		return e.extractFromURL(v)
+	default:
+		return "", nil, fmt.Errorf("unsupported input type: %T", input)
+	}
+}
+
+// extractFromURL fetches the URL and extracts content.
+func (e *NTVExtractor) extractFromURL(url string) (string, []string, error) {
+	// Skip processing for filtered URLs
+	filteredPrefixes := []string{
+		"https://www.ntv.com.tr/galeri/",
+		"https://www.ntv.com.tr/yazarlar/",
+		"https://www.ntv.com.tr/video/",
+		"https://www.ntv.com.tr/sporskor/",
+		"https://www.ntv.com.tr/otomobil/",
+	}
+
+	for _, prefix := range filteredPrefixes {
+		if strings.HasPrefix(url, prefix) {
+			return "", nil, fmt.Errorf("URL is in filtered list: %s", url)
+		}
+	}
+
+	// Only process article URLs
+	if !strings.Contains(url, "ntv.com.tr/") || !strings.Contains(url, "-") {
+		return "", nil, fmt.Errorf("not an NTV article URL: %s", url)
+	}
+
+	resp, err := e.httpClient.Get(url)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to fetch URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	content, images, err := e.extractFromHTML(resp.Body)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to extract content: %w", err)
+	}
+
+	return content, images, nil
+}
+
+// extractFromHTML extracts content from HTML using ntv.com.tr specific selectors.
+func (e *NTVExtractor) extractFromHTML(reader io.Reader) (string, []string, error) {
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	// Extract main content
+	var content string
+	doc.Find("div.category-detail-content-inner").Each(func(i int, s *goquery.Selection) {
+		// Remove unwanted elements
+		s.Find("script, style, iframe, noscript, .ad, .advertisement, .social-share, .related-news").Remove()
+		
+		// Get the clean HTML
+		html, _ := s.Html()
+		content = strings.TrimSpace(html)
+	})
+
+	// If no content found with the main selector, try alternative selectors
+	if content == "" {
+		doc.Find("div.article-content, article, .content, .article-body").Each(func(i int, s *goquery.Selection) {
+			s.Find("script, style, iframe, noscript, .ad, .advertisement, .social-share").Remove()
+			html, _ := s.Html()
+			content = strings.TrimSpace(html)
+		})
+	}
+
+	// Clean up any remaining HTML/body tags and specific patterns
+	content = strings.ReplaceAll(content, "<html><body>", "")
+	content = strings.ReplaceAll(content, "</body></html>", "")
+	content = strings.ReplaceAll(content, "<html><body>\nve \n</body></html>", "")
+	content = strings.ReplaceAll(content, "<html><body>\n\n</body></html>", "")
+	content = strings.ReplaceAll(content, "<html><body>\n</body></html>", "")
+
+	// Extract images from meta tags
+	images := e.extractImagesFromMeta(doc)
+
+	// If no images found in meta, try to find in content
+	if len(images) == 0 {
+		doc.Find("div.category-detail-content-inner img").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && src != "" {
+				src = strings.TrimSpace(src)
+				if !strings.HasPrefix(src, "http") {
+					src = "https://www.ntv.com.tr" + src
+				}
+				images = append(images, src)
+			}
+		})
+	}
+
+	return content, images, nil
+}
+
+// extractImagesFromMeta extracts image URLs from Open Graph and Twitter Card meta tags.
+func (e *NTVExtractor) extractImagesFromMeta(doc *goquery.Document) []string {
+	var images []string
+
+	// Check common meta tags for images
+	metaSelectors := []struct {
+		selector string
+		attr     string
+	}{
+		{`meta[property="og:image"]`, "content"},
+		{`meta[name="twitter:image"]`, "content"},
+		{`link[rel="image_src"]`, "href"},
+	}
+
+	for _, meta := range metaSelectors {
+		doc.Find(meta.selector).Each(func(i int, s *goquery.Selection) {
+			if url, exists := s.Attr(meta.attr); exists && url != "" {
+				url = strings.TrimSpace(url)
+				if !strings.HasPrefix(url, "http") {
+					url = "https://www.ntv.com.tr" + url
+				}
+				images = append(images, url)
+			}
+		})
+	}
+
+	return images
+}

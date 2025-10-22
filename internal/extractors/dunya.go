@@ -10,6 +10,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+
 // DunyaExtractor handles content extraction for dunya.com domain.
 // It processes any URL on the domain without specific pattern filtering.
 type DunyaExtractor struct {
@@ -73,49 +74,91 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 		return "", nil, err
 	}
 
-	// First, try to get meta tag images (more reliable for main article image)
+	// First, try to get the main image from meta tags (most reliable)
 	var images []string
-	if ogImage, exists := doc.Find(`meta[property="og:image"]`).Attr("content"); exists && ogImage != "" {
-		images = append(images, ogImage)
-	}
-	if twitterImage, exists := doc.Find(`meta[name="twitter:image"]`).Attr("content"); exists && twitterImage != "" {
-		images = append(images, twitterImage)
+	
+	// Try to get the main image from meta tags in order of preference
+	metaSelectors := []struct {
+		selector string
+		attr     string
+	}{
+		{`meta[property="og:image"]`, "content"},
+		{`meta[name="twitter:image"]`, "content"},
+		{`link[rel="image_src"]`, "href"},
+		{`meta[property="og:image:url"]`, "content"},
 	}
 
-	// Target the specific content div for dunya.com
-	contentDiv := doc.Find(`div.content-text[property="articleBody"]`).First()
-	if contentDiv.Length() == 0 {
-		return "", nil, fmt.Errorf("content div not found")
-	}
-
-	// Remove unwanted elements
-	contentDiv.Find("script, style, .ad, .advertisement, .social-share").Remove()
-
-	// Extract images from content as fallback
-	contentDiv.Find("img").Each(func(i int, s *goquery.Selection) {
-		if src, exists := s.Attr("src"); exists && src != "" {
-			if strings.HasPrefix(src, "http") {
-				images = append(images, src)
-			} else if strings.HasPrefix(src, "//") {
-				images = append(images, "https:"+src)
+	for _, meta := range metaSelectors {
+		if img, exists := doc.Find(meta.selector).First().Attr(meta.attr); exists && img != "" {
+			img = strings.TrimSpace(img)
+			if img != "" {
+				if !strings.HasPrefix(img, "http") && !strings.HasPrefix(img, "//") {
+					img = "https://www.dunya.com" + strings.TrimLeft(img, "/")
+				} else if strings.HasPrefix(img, "//") {
+					img = "https:" + img
+				}
+				images = []string{img}
+				break
 			}
 		}
-	})
+	}
 
-	// Get the HTML content
-	htmlContent, err = contentDiv.Html()
+	// Get the main content - specifically target div.content-text
+	contentDiv := doc.Find("div.content-text").First()
+	if contentDiv.Length() == 0 {
+		// Fallback to other possible content containers if the main one is not found
+		contentDiv = doc.Find(`div[property="articleBody"], .article-content`).First()
+	}
+
+	// If we still don't have content, return an error
+	if contentDiv.Length() == 0 {
+		return "", images, fmt.Errorf("could not find main content in the page")
+	}
+
+	// Remove unwanted elements that might be inside the content
+	contentDiv.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, .related-news, .tags, .author, .date`).Remove()
+
+	// Clean up the content
+	content, err := contentDiv.Html()
 	if err != nil {
-		return "", nil, err
+		return "", images, fmt.Errorf("error getting HTML content: %v", err)
 	}
 
-	// Decode HTML entities (e.g., &ouml; -> ö) in the raw HTML string
-	decodedHTML := html.UnescapeString(htmlContent)
+	content = strings.TrimSpace(html.UnescapeString(content))
 
-	// Clean up the HTML
-	decodedHTML = strings.TrimSpace(decodedHTML)
-	if decodedHTML == "" {
-		return "", nil, fmt.Errorf("empty content")
+	// If no meta tag image found, try to find it in the content
+	if len(images) == 0 {
+		// Look for images only within the content area
+		contentDiv.Find("img").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && src != "" {
+				src = strings.TrimSpace(src)
+				if src == "" {
+					return
+				}
+
+				// Handle different URL formats
+				if strings.HasPrefix(src, "//") {
+					src = "https:" + src
+				} else if !strings.HasPrefix(src, "http") {
+					src = "https://www.dunya.com" + strings.TrimLeft(src, "/")
+				}
+
+				// Skip small images and icons
+				lowerSrc := strings.ToLower(src)
+				if !strings.HasSuffix(lowerSrc, ".svg") && 
+				   !strings.Contains(lowerSrc, "icon") && 
+				   !strings.Contains(lowerSrc, "logo") &&
+				   !contains(images, src) {
+					images = append(images, src)
+				}
+			}
+		})
 	}
 
-	return decodedHTML, images, nil
+	// Ensure we return at least an empty slice, not nil
+	if images == nil {
+		images = []string{}
+	}
+
+	return content, images, nil
 }

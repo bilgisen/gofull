@@ -4,34 +4,38 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"html"
+	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/mmcdole/gofeed"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-shiori/go-readability"
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/PuerkitoBio/goquery"
+	"github.com/mmcdole/gofeed"
 
-	"gofull/internal/extractors" // Registry ve Extractor için import
+	"gofull/internal/extractors"
+	"gofull/internal/extractors/filters"
 )
 
 // FeedHandler handles fetching and returning RSS feed content.
-// Uses in-memory cache to reduce redundant fetches.
 type FeedHandler struct {
-	Cache    *Cache
-	Client   *http.Client // Extractor'lar için HTTP client gerekebilir
-	Registry *extractors.Registry // Extractor seçimi için Registry
+	Cache     *Cache
+	Client    *http.Client
+	Registry  *extractors.Registry
+	FilterReg *filters.FilterRegistry
 }
 
-// NewFeedHandler creates a new FeedHandler.
-// Registry ve Client artık FeedHandler'ın bir parçası.
-func NewFeedHandler(cache *Cache, client *http.Client, registry *extractors.Registry) *FeedHandler {
+// NewFeedHandler creates a new FeedHandler with filter support
+func NewFeedHandler(cache *Cache, client *http.Client, registry *extractors.Registry, filterReg *filters.FilterRegistry) *FeedHandler {
 	return &FeedHandler{
-		Cache:    cache,
-		Client:   client, // retryablehttp.NewClient().StandardClient() gibi bir şey olabilir
-		Registry: registry,
+		Cache:     cache,
+		Client:    client,
+		Registry:  registry,
+		FilterReg: filterReg,
 	}
 }
 
@@ -39,10 +43,11 @@ func NewFeedHandler(cache *Cache, client *http.Client, registry *extractors.Regi
 type Item struct {
 	Title       string `json:"title"`
 	Link        string `json:"link"`
+	GUID        string `json:"guid"`
 	Published   string `json:"published"`
 	Description string `json:"description,omitempty"`
 	Content     string `json:"content,omitempty"`
-	Image       string `json:"image,omitempty"` // Yeni alan
+	Image       string `json:"image,omitempty"`
 }
 
 // ServeHTTP implements http.Handler for FeedHandler.
@@ -91,24 +96,38 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit items
-	if len(feed.Items) > limit {
-		feed.Items = feed.Items[:limit]
-	}
+	// Process items with filtering
+	var items []Item
+	processedCount := 0
+	skippedCount := 0
 
-	// Process each entry content
-	var items []Item // Item tipi burada kullanılıyor
-	for _, i := range feed.Items {
-		// processItem fonksiyonunu çağır
-		item := h.processItem(i)
+	for _, feedItem := range feed.Items {
+		// Stop if we reached the limit
+		if processedCount >= limit {
+			break
+		}
+
+		// Apply URL filter
+		if feedItem.Link != "" && !h.FilterReg.ShouldProcess(feedItem.Link) {
+			log.Printf("⏭️  Skipping filtered URL: %s", feedItem.Link)
+			skippedCount++
+			continue
+		}
+
+		// Process the item
+		item := h.processItem(feedItem)
 		items = append(items, item)
+		processedCount++
+
+		log.Printf("✅ [%d/%d] Processed: %s (skipped: %d)", processedCount, limit, feedItem.Title, skippedCount)
 	}
 
 	data := map[string]any{
-		"feed_title": feed.Title,
-		"feed_link":  feed.Link,
-		"item_count": len(items),
-		"items":      items,
+		"feed_title":     feed.Title,
+		"feed_link":      feed.Link,
+		"items_returned": len(items),
+		"items_skipped":  skippedCount,
+		"items":          items,
 	}
 
 	jsonBytes, err := json.MarshalIndent(data, "", "  ")
@@ -125,46 +144,90 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // processItem extracts content and image using registered extractors.
-func (h *FeedHandler) processItem(i *gofeed.Item) Item { // Item tipi burada döndürülüyor
+func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 	content := i.Content
-	imageURL := "" // Varsayılan olarak boş
+	imageURL := ""
+
+	// Create a map to pass feed item data to extractor
+	itemData := map[string]interface{}{
+		"link": i.Link,
+	}
+
+	// If the feed item has an image, add it to the data
+	if i.Image != nil && i.Image.URL != "" {
+		itemData["image"] = i.Image.URL
+		imageURL = i.Image.URL
+	}
 
 	if i.Link != "" {
-		// Registry'den uygun extractor'ı al
+		// Get appropriate extractor from registry
 		extractor := h.Registry.ForURL(i.Link)
 
-		// Extractor'dan içerik ve görsel al
-		// DunyaExtractor any input destekliyor.
-		// DefaultExtractor da any input destekliyor.
-		extractedContent, extractedImages, err := extractor.Extract(i.Link)
+		// Log which extractor is being used
+		extractorType := fmt.Sprintf("%T", extractor)
+		log.Printf("🔍 Using extractor: %s for URL: %s", extractorType, i.Link)
+
+		// Extract content and images using the extractor with item data
+		extractedContent, extractedImages, err := extractor.Extract(itemData)
 		if err == nil {
-			// Extractor içerik veya görsel sağladıysa kullan
 			if extractedContent != "" {
-				content = cleanHTMLContent(extractedContent) // Feed'deki content'i extractor'dan gelenle değiştir
+				content = cleanHTMLContent(extractedContent)
 			}
 			if len(extractedImages) > 0 {
-				imageURL = extractedImages[0] // İlk görsel URL'sini al
+				imageURL = extractedImages[0]
+				log.Printf("🖼️  Found image for %s: %s", i.Link, imageURL)
+			} else {
+				log.Printf("⚠️  No images found for URL: %s", i.Link)
 			}
 		} else {
-			// Extractor başarısız olursa, readability ile dene (eski yöntem)
+			// Fallback to readability
+			log.Printf("⚠️  Extractor failed for %s, using readability: %v", i.Link, err)
 			if content == "" {
 				article, err := readability.FromURL(i.Link, 15*time.Second)
 				if err == nil {
-					content = cleanHTMLContent(article.Content) // Readability içeriğini de temizle
+					content = cleanHTMLContent(article.Content)
+					// Try to extract images from the readability content
+					doc, err := goquery.NewDocumentFromReader(strings.NewReader(article.Content))
+					if err == nil {
+						doc.Find("img").Each(func(i int, s *goquery.Selection) {
+							if src, exists := s.Attr("src"); exists && src != "" && imageURL == "" {
+								imageURL = src
+							}
+						})
+						if imageURL != "" {
+							log.Printf("🖼️  Found fallback image from readability: %s", imageURL)
+						}
+					}
 				}
 			}
-			// Görsel alımı için readability yeterli olmayabilir.
-			// DunyaExtractor gibi özel extractor'lar görsel alımında daha başarılıdır.
 		}
 	}
 
-	return Item{ // Item tipi burada oluşturuluyor
+	// If we still don't have an image, try to get it from the feed item's enclosures
+	if imageURL == "" && len(i.Enclosures) > 0 {
+		for _, enc := range i.Enclosures {
+			if strings.HasPrefix(enc.Type, "image/") && enc.URL != "" {
+				imageURL = enc.URL
+				log.Printf("🖼️  Found image from feed enclosure: %s", imageURL)
+				break
+			}
+		}
+	}
+
+	// If we still don't have an image, try to get it from the feed item's image
+	if imageURL == "" && i.Image != nil && i.Image.URL != "" {
+		imageURL = i.Image.URL
+		log.Printf("🖼️  Found image from feed item: %s", imageURL)
+	}
+
+	return Item{
 		Title:       i.Title,
 		Link:        i.Link,
+		GUID:        extractors.GenerateGUIDFromURL(i.Link),
 		Published:   formatTime(i.PublishedParsed),
 		Description: i.Description,
 		Content:     strings.TrimSpace(content),
-		Image:       imageURL, // Yeni alan
+		Image:       imageURL,
 	}
 }
 
@@ -175,26 +238,129 @@ func formatTime(t *time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-// cleanHTMLContent removes unwanted HTML tags and cleans up the content
-func cleanHTMLContent(html string) string {
-	// Basic cleaning - remove script and style tags
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return html // Return original if parsing fails
+// cleanHTMLContent cleans and normalizes HTML content by removing unwanted elements
+// and ensuring proper UTF-8 encoding
+func cleanHTMLContent(htmlContent string) string {
+	// Return early if content is empty or whitespace only
+	if strings.TrimSpace(htmlContent) == "" {
+		return ""
 	}
 
-	// Remove script and style elements
-	doc.Find("script, style").Remove()
+	// Remove <html><body> and </body></html> tags
+	htmlContent = strings.ReplaceAll(htmlContent, "<html><body>", "")
+	htmlContent = strings.ReplaceAll(htmlContent, "</body></html>", "")
+
+	// Create a new document from the HTML content
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		return htmlContent
+	}
+
+	// Remove unwanted elements (scripts, styles, ads, etc.)
+	unwantedSelectors := []string{
+		// Basic elements
+		"script", "style", "iframe", "noscript", "object", "embed", "video", "audio",
+		"form", "input", "button", "select", "textarea", "label", "fieldset",
+		"header", "footer", "nav", "aside", "menu", "dialog", "figure", "figcaption",
+		
+		// Ads and tracking
+		".ad", ".advertisement", ".ad-container", ".ad-wrapper", ".ad-banner", 
+		".ad-header", ".ad-sidebar", ".ad-slot", ".ad-unit", ".advert",
+		".social-share", ".social-likes", ".sharing", ".share-buttons",
+		".related-news", ".related-posts", ".related-articles", ".recommended",
+		".popular-posts", ".trending", ".newsletter", ".subscribe",
+		".tags", ".tag-cloud", ".post-tags", ".post-meta", ".post-footer",
+		".author", ".byline", ".post-date", ".timestamp", ".comments",
+	}
+
+	// Add dynamic selectors for common ad patterns
+	for _, sel := range unwantedSelectors {
+		doc.Find(sel).Remove()
+	}
+
+	// Clean up divs and other elements
+	doc.Find("div, section, article, main").Each(func(i int, s *goquery.Selection) {
+		// Get element attributes
+		class, _ := s.Attr("class")
+		id, _ := s.Attr("id")
+		role, _ := s.Attr("role")
+		
+		// Check for unwanted elements
+		isUnwanted := false
+		
+		// Check class and ID patterns
+		lowerClass := strings.ToLower(class)
+		lowerId := strings.ToLower(id)
+		
+		unwantedPatterns := []string{
+			"ad", "banner", "sponsor", "recommend", "related", "popular",
+			"widget", "sidebar", "sticky", "modal", "popup", "newsletter",
+			"subscribe", "social", "share", "comment", "cookie", "consent",
+			"notification", "alert", "promo", "teaser", "recommendation",
+			"trending", "most-viewed", "most-read", "signup",
+		}
+		
+		for _, pattern := range unwantedPatterns {
+			if strings.Contains(lowerClass, pattern) || strings.Contains(lowerId, pattern) {
+				isUnwanted = true
+				break
+			}
+		}
+		
+		// Check for empty or nearly empty elements
+		text := strings.TrimSpace(s.Text())
+		if !isUnwanted && text == "" && s.Children().Length() == 0 {
+			isUnwanted = true
+		}
+		
+		// Check for common ad roles
+		if role == "banner" || role == "complementary" || role == "contentinfo" {
+			isUnwanted = true
+		}
+		
+		// Remove if unwanted
+		if isUnwanted {
+			s.Remove()
+		}
+	})
+
+	// Clean up empty elements
+	doc.Find("p, span, div, section, article, header, footer, aside").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text == "" && s.Children().Length() == 0 {
+			s.Remove()
+		}
+	})
+
+	// Normalize whitespace in text nodes
+	doc.Find("body").Each(func(i int, s *goquery.Selection) {
+		s.Contents().Each(func(i int, node *goquery.Selection) {
+			if node.Nodes[0].Type == 1 { // ElementNode
+				// Skip non-text nodes
+				return
+			}
+			if node.Nodes[0].Type == 3 { // TextNode
+				node.ReplaceWithHtml(strings.Join(strings.Fields(node.Text()), " "))
+			}
+		})
+	})
 
 	// Get the cleaned HTML
-	cleaned, err := doc.Html()
+	htmlStr, err := doc.Html()
 	if err != nil {
-		return html // Return original if getting HTML fails
+		return htmlContent
 	}
 
-	// Remove extra whitespace and newlines
-	cleaned = strings.TrimSpace(cleaned)
-	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	// Decode HTML entities and normalize
+	htmlStr = html.UnescapeString(htmlStr)
+	
+	// Clean up whitespace
+	htmlStr = regexp.MustCompile(`\s+`).ReplaceAllString(htmlStr, " ")
+	htmlStr = strings.TrimSpace(htmlStr)
+	
+	// Remove any remaining empty HTML tags
+	htmlStr = regexp.MustCompile(`<\w+\s*(?:[^>]*)>\s*<\/\w+>`).ReplaceAllString(htmlStr, "")
+	htmlStr = regexp.MustCompile(`<\w+\s*(?:[^>]*)>\s*<\/\w+\s*>`).ReplaceAllString(htmlStr, "")
 
-	return cleaned
+	return htmlStr
 }
