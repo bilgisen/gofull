@@ -75,6 +75,18 @@ func NewServer(cfg *Config) (*Server, error) {
 		},
 	})
 
+	// Register cnbce.com filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "cnbce.com",
+		BlockedPaths: []string{
+			"/haberler",
+			"/tv",
+			"/art-e",
+			"/gundem",
+			"/son-dakika",
+		},
+	})
+
 	// Add more filters here as needed
 	// Example:
 	// filterReg.Register(filters.URLFilter{
