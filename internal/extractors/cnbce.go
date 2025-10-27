@@ -62,6 +62,21 @@ func (c *CNBCEExtractor) Extract(input any) (string, []string, error) {
 
 // extractFromURL fetches the URL and extracts content.
 func (c *CNBCEExtractor) extractFromURL(articleURL string) (string, []string, error) {
+	// Skip processing for filtered URLs
+	filteredPrefixes := []string{
+		"https://www.cnbce.com/haberler/",
+		"https://www.cnbce.com/tv/",
+		"https://www.cnbce.com/art-e/",
+		"https://www.cnbce.com/gundem/",
+		"https://www.cnbce.com/son-dakika/",
+	}
+
+	for _, prefix := range filteredPrefixes {
+		if strings.HasPrefix(articleURL, prefix) {
+			return "", nil, fmt.Errorf("URL is in filtered list: %s", articleURL)
+		}
+	}
+
 	req, err := http.NewRequest("GET", articleURL, nil)
 	if err != nil {
 		return "", nil, err
