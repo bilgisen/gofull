@@ -6,6 +6,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -28,34 +29,59 @@ func NewCNBCEExtractor(client *http.Client) *CNBCEExtractor {
 }
 
 // isFilteredURL checks if the URL matches any of the filtered patterns
-func (c *CNBCEExtractor) isFilteredURL(url string) bool {
-	// Normalize the URL for consistent comparison
-	normalizedURL := strings.ToLower(strings.TrimRight(url, "/"))
-	
-	filteredPatterns := []string{
-		"cnbce.com/haberler",
-		"cnbce.com/tv",
-		"cnbce.com/art-e",
-		"cnbce.com/gundem",
-		"cnbce.com/son-dakika",
-		"//cnbce.com/haberler",
-		"www.cnbce.com/haberler",
+func (c *CNBCEExtractor) isFilteredURL(inputURL string) bool {
+	// Parse the URL
+	parsedURL, err := url.Parse(inputURL)
+	if err != nil {
+		// If parsing fails, it's likely not a valid URL to process anyway,
+		// but for filtering logic, we might consider it not filtered.
+		// Or, you might want to log this error.
+		// Returning false here means a malformed URL is not filtered.
+		return false
 	}
 
-	// Check for exact matches first
-	for _, pattern := range filteredPatterns {
-		if strings.Contains(normalizedURL, pattern) {
+	// Normalize Host (Domain) to lowercase
+	normalizedHost := strings.ToLower(parsedURL.Host)
+
+	// Normalize Path: Ensure it starts with /, and handle trailing slash if necessary for specific checks
+	// The path from url.Parse is already in a standard format.
+	path := parsedURL.Path
+
+	// Define domains to check against (normalize once)
+	allowedDomains := []string{"cnbce.com", "www.cnbce.com"} // Add other variations if needed
+	hostMatched := false
+	for _, domain := range allowedDomains {
+		if normalizedHost == domain { // Exact match for host
+			hostMatched = true
+			break
+		}
+	}
+
+	if !hostMatched {
+		return false // Not a cnbce.com domain, not filtered
+	}
+
+	// If it's a cnbce.com domain, check the path
+	// Define path prefixes to filter
+	filteredPathPrefixes := []string{
+		"/haberler",
+		"/tv",
+		"/art-e",
+		"/gundem",
+		"/son-dakika",
+		// Add other prefixes as needed
+	}
+
+	for _, prefix := range filteredPathPrefixes {
+		// Check if the path starts with the filtered prefix.
+		// This correctly handles /haberler, /haberler/, /haberler/some-article, etc.
+		if strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}
 
-	// Check for URL paths that start with /haberler/
-	if u, err := http.ParseRequestURI(normalizedURL); err == nil {
-		path := strings.ToLower(u.Path)
-		if strings.HasPrefix(path, "/haberler/") {
-			return true
-		}
-	}
+	// Specific exact path matches could be added here if needed
+	// Example: if path == "/some-specific-page" { return true }
 
 	return false
 }
