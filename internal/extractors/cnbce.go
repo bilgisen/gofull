@@ -27,21 +27,36 @@ func NewCNBCEExtractor(client *http.Client) *CNBCEExtractor {
 	}
 }
 
-// isFilteredURL checks if the URL matches any of the filtered prefixes
+// isFilteredURL checks if the URL matches any of the filtered patterns
 func (c *CNBCEExtractor) isFilteredURL(url string) bool {
-	filteredPrefixes := []string{
-		"https://www.cnbce.com/haberler/",
-		"https://www.cnbce.com/tv/",
-		"https://www.cnbce.com/art-e/",
-		"https://www.cnbce.com/gundem/",
-		"https://www.cnbce.com/son-dakika/",
+	// Normalize the URL for consistent comparison
+	normalizedURL := strings.ToLower(strings.TrimRight(url, "/"))
+	
+	filteredPatterns := []string{
+		"cnbce.com/haberler",
+		"cnbce.com/tv",
+		"cnbce.com/art-e",
+		"cnbce.com/gundem",
+		"cnbce.com/son-dakika",
+		"//cnbce.com/haberler",
+		"www.cnbce.com/haberler",
 	}
 
-	for _, prefix := range filteredPrefixes {
-		if strings.HasPrefix(url, prefix) {
+	// Check for exact matches first
+	for _, pattern := range filteredPatterns {
+		if strings.Contains(normalizedURL, pattern) {
 			return true
 		}
 	}
+
+	// Check for URL paths that start with /haberler/
+	if u, err := http.ParseRequestURI(normalizedURL); err == nil {
+		path := strings.ToLower(u.Path)
+		if strings.HasPrefix(path, "/haberler/") {
+			return true
+		}
+	}
+
 	return false
 }
 
