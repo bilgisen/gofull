@@ -27,22 +27,57 @@ func NewCNBCEExtractor(client *http.Client) *CNBCEExtractor {
 	}
 }
 
+// isFilteredURL checks if the URL matches any of the filtered prefixes
+func (c *CNBCEExtractor) isFilteredURL(url string) bool {
+	filteredPrefixes := []string{
+		"https://www.cnbce.com/haberler/",
+		"https://www.cnbce.com/tv/",
+		"https://www.cnbce.com/art-e/",
+		"https://www.cnbce.com/gundem/",
+		"https://www.cnbce.com/son-dakika/",
+	}
+
+	for _, prefix := range filteredPrefixes {
+		if strings.HasPrefix(url, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Extract implements the Extractor interface for cnbce.com URLs.
 func (c *CNBCEExtractor) Extract(input any) (string, []string, error) {
 	switch v := input.(type) {
 	case string:
-		// Input is a URL, fetch and extract content
+		// Input is a URL, check if it's filtered
+		if c.isFilteredURL(v) {
+			return "", nil, fmt.Errorf("URL is in filtered list: %s", v)
+		}
 		return c.extractFromURL(v)
 
 	case map[string]string:
 		// Handle map[string]string with "html" key
 		if htmlContent, ok := v["html"]; ok {
+			// Check if URL is provided in the map and if it's filtered
+			if url, exists := v["url"]; exists && c.isFilteredURL(url) {
+				return "", nil, fmt.Errorf("URL is in filtered list: %s", url)
+			}
+			if link, exists := v["link"]; exists && c.isFilteredURL(link) {
+				return "", nil, fmt.Errorf("URL is in filtered list: %s", link)
+			}
 			return c.extractFromHTML(htmlContent)
 		}
 
 	case map[string]interface{}:
 		// Handle map[string]interface{} with "html" key
 		if htmlContent, ok := v["html"].(string); ok {
+			// Check if URL is provided in the map and if it's filtered
+			if url, exists := v["url"].(string); exists && c.isFilteredURL(url) {
+				return "", nil, fmt.Errorf("URL is in filtered list: %s", url)
+			}
+			if link, exists := v["link"].(string); exists && c.isFilteredURL(link) {
+				return "", nil, fmt.Errorf("URL is in filtered list: %s", link)
+			}
 			return c.extractFromHTML(htmlContent)
 		}
 		// If no html key, try to get URL from common fields
@@ -62,20 +97,6 @@ func (c *CNBCEExtractor) Extract(input any) (string, []string, error) {
 
 // extractFromURL fetches the URL and extracts content.
 func (c *CNBCEExtractor) extractFromURL(articleURL string) (string, []string, error) {
-	// Skip processing for filtered URLs
-	filteredPrefixes := []string{
-		"https://www.cnbce.com/haberler/",
-		"https://www.cnbce.com/tv/",
-		"https://www.cnbce.com/art-e/",
-		"https://www.cnbce.com/gundem/",
-		"https://www.cnbce.com/son-dakika/",
-	}
-
-	for _, prefix := range filteredPrefixes {
-		if strings.HasPrefix(articleURL, prefix) {
-			return "", nil, fmt.Errorf("URL is in filtered list: %s", articleURL)
-		}
-	}
 
 	req, err := http.NewRequest("GET", articleURL, nil)
 	if err != nil {
@@ -141,27 +162,58 @@ func (c *CNBCEExtractor) extractFromHTML(htmlContent string) (string, []string, 
 		}
 	}
 
-	// Try to find the main content
-	contentSelectors := []string{
-		"div.entry-content",   // Common WordPress content class
-		"article",             // Standard HTML5 article tag
-		"div.post-content",    // Common class for post content
-		"div.article-content", // Common class for article content
-		"div.content",         // Generic content class
-		"#content",            // Common ID for content
-	}
+	// Try to find the main content with specific class
+	contentDiv := doc.Find(".content-text").First()
+	if contentDiv.Length() == 0 {
+		// If no content-text class found, try other selectors as fallback
+		contentSelectors := []string{
+			"div.article-body",    // Alternative content class
+			"div.entry-content",   // Common WordPress content class
+			"article",             // Standard HTML5 article tag
+			"div.post-content",    // Common class for post content
+			"div.article-content", // Common class for article content
+		}
 
-	var contentDiv *goquery.Selection
-	for _, selector := range contentSelectors {
-		contentDiv = doc.Find(selector).First()
-		if contentDiv.Length() > 0 {
-			break
+		for _, selector := range contentSelectors {
+			contentDiv = doc.Find(selector).First()
+			if contentDiv.Length() > 0 {
+				break
+			}
+		}
+
+		// If we still don't have content, use the body as a last resort
+		if contentDiv.Length() == 0 {
+			contentDiv = doc.Find("body")
 		}
 	}
 
-	// If we still don't have content, use the body as a last resort
-	if contentDiv == nil || contentDiv.Length() == 0 {
-		contentDiv = doc.Find("body")
+	// Remove unwanted elements that might contain related articles, ads, or other unwanted content
+	unwantedSelectors := []string{
+		".related-news",
+		".mceNonEditable",
+		".block.lg\\:hidden",
+		".relative.hidden.space-y-7.5.lg\\:block",
+		".adpro.big-box",
+		".related-articles",
+		".popular-news",
+		".populer-haberler",
+		".diger-haberler",
+		".benzer-haberler",
+		".more-news",
+		".daha-fazla",
+		".tags",
+		".etiketler",
+		".social-share",
+		".yazar-bilgisi",
+		".author-info",
+		".yorumlar",
+		".comments",
+		".reklam",
+		".advertisement",
+	}
+
+	for _, selector := range unwantedSelectors {
+		contentDiv.Find(selector).Remove()
 	}
 
 	// If no meta tag image found, try to find it in the content
