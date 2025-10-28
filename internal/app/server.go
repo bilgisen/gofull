@@ -67,11 +67,13 @@ func NewServer(cfg *Config) (*Server, error) {
 		AllowedPaths: []string{
 			"/finans/haberler/",
 			"/sirketler/",
+            "/sektorler/",
 			"/ekonomi/",
 		},
 		BlockedPaths: []string{
 			"/spor/",
-			"/gundem/",
+			"/gundem/"
+            "/video-galeri/",
 		},
 	})
 
@@ -84,6 +86,30 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/art-e",
 			"/gundem",
 			"/son-dakika",
+		},
+	})
+
+	// Register ntv.com.tr filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "ntv.com.tr",
+		AllowedPaths: []string{
+			"/kultur-ve-sanat",
+			"/dunya",
+			"/teknoloji",
+			"/sporskor",
+		},
+		BlockedPaths: []string{
+			"/foto-galeri",
+			"/galeri",
+			"/dizi-haber",
+			"/magazin",
+			"/yasam",
+			"/saglikli-yasam",
+			"/yazarlar",
+			"//video",
+			"/turkiye",
+			"/son-dakika",
+			"/gundem",
 		},
 	})
 
