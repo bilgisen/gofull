@@ -34,17 +34,23 @@ func (e *NTVExtractor) Extract(input any) (string, []string, error) {
 		return e.extractFromURL(v)
 
 	case map[string]string:
-		// Handle map[string]string with "html" key
+		// Handle map[string]string with "content" or "html" key
+		if content, ok := v["content"]; ok {
+			return e.cleanContent(content), nil, nil
+		}
 		if htmlContent, ok := v["html"]; ok {
 			return e.extractFromHTML(strings.NewReader(htmlContent))
 		}
 
 	case map[string]interface{}:
-		// Handle map[string]interface{} with "html" key
-		if htmlContent, ok := v["html"].(string); ok {
+		// Handle map[string]interface{} with "content" or "html" key
+		if content, ok := v["content"].(string); ok && content != "" {
+			return e.cleanContent(content), nil, nil
+		}
+		if htmlContent, ok := v["html"].(string); ok && htmlContent != "" {
 			return e.extractFromHTML(strings.NewReader(htmlContent))
 		}
-		// If no html key, try to get URL from common fields
+		// If no content/html key, try to get URL from common fields
 		if url, ok := v["url"].(string); ok && url != "" {
 			return e.extractFromURL(url)
 		}
@@ -106,6 +112,11 @@ func (e *NTVExtractor) extractFromHTML(reader io.Reader) (string, []string, erro
 		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
+	// Try to get content from feed content field first
+	if content := doc.Find("content").Text(); content != "" {
+		return e.cleanContent(content), nil, nil
+	}
+
 	// Extract main content
 	var content string
 	doc.Find("div.category-detail-content-inner").Each(func(i int, s *goquery.Selection) {
@@ -126,12 +137,8 @@ func (e *NTVExtractor) extractFromHTML(reader io.Reader) (string, []string, erro
 		})
 	}
 
-	// Clean up any remaining HTML/body tags and specific patterns
-	content = strings.ReplaceAll(content, "<html><body>", "")
-	content = strings.ReplaceAll(content, "</body></html>", "")
-	content = strings.ReplaceAll(content, "<html><body>\nve \n</body></html>", "")
-	content = strings.ReplaceAll(content, "<html><body>\n\n</body></html>", "")
-	content = strings.ReplaceAll(content, "<html><body>\n</body></html>", "")
+	// Clean the content by removing HTML tags
+	content = e.cleanContent(content)
 
 	// Extract images from meta tags
 	images := e.extractImagesFromMeta(doc)
@@ -150,6 +157,34 @@ func (e *NTVExtractor) extractFromHTML(reader io.Reader) (string, []string, erro
 	}
 
 	return content, images, nil
+}
+
+// cleanContent removes HTML tags and cleans up the content
+func (e *NTVExtractor) cleanContent(content string) string {
+	// Remove CDATA if present
+	content = strings.ReplaceAll(content, "<![CDATA[", "")
+	content = strings.ReplaceAll(content, "]]>", "")
+
+	// Remove HTML tags using a simple regex (faster than parsing the HTML for simple cases)
+	re := regexp.MustCompile(`<[^>]*>`)
+	content = re.ReplaceAllString(content, "")
+
+	// Replace HTML entities
+	replacer := strings.NewReplacer(
+		"&quot;", "\"",
+		"&amp;", "&",
+		"&lt;", "<",
+		"&gt;", ">",
+		"&nbsp;", " ",
+		"&apos;", "'",
+	)
+	content = replacer.Replace(content)
+
+	// Clean up whitespace
+	content = strings.TrimSpace(content)
+	content = strings.Join(strings.Fields(content), " ")
+
+	return content
 }
 
 // extractImagesFromMeta extracts image URLs from Open Graph and Twitter Card meta tags.
