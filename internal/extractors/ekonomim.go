@@ -89,11 +89,10 @@ func (e *EkonomimExtractor) extractFromURL(articleURL string) (string, []string,
 		}
 	}
 
-	// Only process article URLs under allowed paths
+	// Basic URL validation
 	if !strings.Contains(articleURL, "ekonomim.com/") || 
-	   !strings.Contains(articleURL, "-") || 
-	   !strings.HasPrefix(articleURL, "https://www.ekonomim.com/gundem/") {
-		return "", nil, fmt.Errorf("not an allowed Ekonomim article URL: %s", articleURL)
+	   !strings.Contains(articleURL, "-") {
+		return "", nil, fmt.Errorf("not a valid Ekonomim article URL: %s", articleURL)
 	}
 
 	resp, err := e.httpClient.Get(articleURL)
