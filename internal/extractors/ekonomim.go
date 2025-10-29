@@ -40,7 +40,7 @@ func (e *EkonomimExtractor) Extract(input any) (string, []string, error) {
 			return e.cleanContent(content), nil, nil
 		}
 		if htmlContent, ok := v["html"]; ok {
-			return e.extractFromHTML(strings.NewReader(htmlContent))
+			return e.extractFromHTML(htmlContent)
 		}
 
 	case map[string]interface{}:
@@ -49,7 +49,7 @@ func (e *EkonomimExtractor) Extract(input any) (string, []string, error) {
 			return e.cleanContent(content), nil, nil
 		}
 		if htmlContent, ok := v["html"].(string); ok && htmlContent != "" {
-			return e.extractFromHTML(strings.NewReader(htmlContent))
+			return e.extractFromHTML(htmlContent)
 		}
 		// If no content/html key, try to get URL from common fields
 		if url, ok := v["url"].(string); ok && url != "" {
@@ -67,7 +67,7 @@ func (e *EkonomimExtractor) Extract(input any) (string, []string, error) {
 }
 
 // extractFromURL fetches the URL and extracts content.
-func (e *EkonomimExtractor) extractFromURL(url string) (string, []string, error) {
+func (e *EkonomimExtractor) extractFromURL(articleURL string) (string, []string, error) {
 	// Skip processing for filtered URLs
 	filteredPrefixes := []string{
 		"https://www.ekonomim.com/spor/",
@@ -84,19 +84,19 @@ func (e *EkonomimExtractor) extractFromURL(url string) (string, []string, error)
 	}
 
 	for _, prefix := range filteredPrefixes {
-		if strings.HasPrefix(url, prefix) {
-			return "", nil, fmt.Errorf("URL is in filtered list: %s", url)
+		if strings.HasPrefix(articleURL, prefix) {
+			return "", nil, fmt.Errorf("URL is in filtered list: %s", articleURL)
 		}
 	}
 
 	// Only process article URLs under allowed paths
-	if !strings.Contains(url, "ekonomim.com/") || 
-	   !strings.Contains(url, "-") || 
-	   !strings.HasPrefix(url, "https://www.ekonomim.com/gundem/") {
-		return "", nil, fmt.Errorf("not an allowed Ekonomim article URL: %s", url)
+	if !strings.Contains(articleURL, "ekonomim.com/") || 
+	   !strings.Contains(articleURL, "-") || 
+	   !strings.HasPrefix(articleURL, "https://www.ekonomim.com/gundem/") {
+		return "", nil, fmt.Errorf("not an allowed Ekonomim article URL: %s", articleURL)
 	}
 
-	resp, err := e.httpClient.Get(url)
+	resp, err := e.httpClient.Get(articleURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to fetch URL: %w", err)
 	}
@@ -106,17 +106,17 @@ func (e *EkonomimExtractor) extractFromURL(url string) (string, []string, error)
 		return "", nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	content, images, err := e.extractFromHTML(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to extract content: %w", err)
+		return "", nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	return content, images, nil
+	return e.extractFromHTML(string(bodyBytes))
 }
 
 // extractFromHTML extracts content from HTML using ekonomim.com specific selectors.
-func (e *EkonomimExtractor) extractFromHTML(reader io.Reader) (string, []string, error) {
-	doc, err := goquery.NewDocumentFromReader(reader)
+func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
