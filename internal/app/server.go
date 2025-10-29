@@ -77,6 +77,27 @@ func NewServer(cfg *Config) (*Server, error) {
 		},
 	})
 
+	// Register ekonomim.com filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "ekonomim.com",
+		AllowedPaths: []string{
+			"/gundem/",
+		},
+		BlockedPaths: []string{
+			"/spor/",
+			"/dunya/",
+			"/foto-galeri/",
+			"/finans/",
+			"/sektorler/",
+			"/yasam/",
+			"/ekonomi/",
+			"/sirketler/",
+			"/yazar/",
+			"/yazarlar/",
+			"/son-dakika/",
+		},
+	})
+
 	// Register cnbce.com filters
 	filterReg.Register(filters.URLFilter{
 		Domain: "cnbce.com",
