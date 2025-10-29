@@ -124,13 +124,20 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 	// Extract main content from content-text div
 	var content string
 	doc.Find(`div.content-text[property="articleBody"]`).Each(func(i int, s *goquery.Selection) {
-		// Remove unwanted elements
+		// First, remove all unwanted elements
 		s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
-			.related-news, .tags, .author, .date, .comments, .adpro, the-ads`).Remove()
+			.related-news, .tags, .author, .date, .comments, .adpro, the-ads, 
+			.picture-bottom_wrapper, .google-news_wrapper, .mceNonEditable`).Remove()
 		
-		// Get the clean HTML
-		html, _ := s.Html()
-		content = strings.TrimSpace(html)
+		// Get all text nodes and join them with newlines
+		var paragraphs []string
+		s.Find(`p`).Each(func(i int, p *goquery.Selection) {
+			if text := strings.TrimSpace(p.Text()); text != "" {
+				paragraphs = append(paragraphs, text)
+			}
+		})
+		
+		content = strings.Join(paragraphs, "\n\n")
 	})
 
 	// If content not found with specific selector, try fallback selectors
@@ -139,8 +146,14 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 			s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
 				.related-news, .tags, .author, .date, .comments, .adpro, the-ads`).Remove()
 			
-			html, _ := s.Html()
-			content = strings.TrimSpace(html)
+			var paragraphs []string
+			s.Find(`p`).Each(func(i int, p *goquery.Selection) {
+				if text := strings.TrimSpace(p.Text()); text != "" {
+					paragraphs = append(paragraphs, text)
+				}
+			})
+			
+			content = strings.Join(paragraphs, "\n\n")
 		})
 	}
 
