@@ -2,7 +2,9 @@ package extractors
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -36,25 +38,65 @@ func (r *Registry) RegisterDefault(e Extractor) {
 // ForURL returns the best extractor for a given URL.
 // It checks for domain-specific extractors first, then falls back to default.
 func (r *Registry) ForURL(urlStr string) Extractor {
+	// Debug: Print all registered domains at the start
+	fmt.Println("\n=== [ForURL] Starting extractor selection ===")
+	fmt.Println("Registered domains and their extractor types:")
+	for domain, extractor := range r.domainExtractors {
+		extractorType := fmt.Sprintf("%T", extractor)
+		fmt.Printf("- %s => %s\n", domain, extractorType)
+	}
+
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
-		// If URL parsing fails, return default extractor
+		fmt.Printf("Error parsing URL '%s': %v\n", urlStr, err)
 		if r.defaultExtractor != nil {
+			fmt.Println("Using default extractor due to URL parse error")
 			return r.defaultExtractor
 		}
+		fmt.Println("No default extractor available, using stub")
 		return &defaultExtractorStub{}
 	}
 
-	// Check for domain-specific extractor
-	domain := parsedURL.Host
+	// Clean and normalize the domain
+	domain := strings.ToLower(parsedURL.Host)
+	fmt.Printf("\nProcessing URL: %s\n", urlStr)
+	fmt.Printf("Extracted domain: %s\n", domain)
+
+	// Try exact match first
 	if extractor, exists := r.domainExtractors[domain]; exists {
+		fmt.Printf("✅ Found exact domain match: %s => %T\n", domain, extractor)
 		return extractor
 	}
 
-	// Fall back to default extractor
+	// Try with/without www
+	var modifiedDomains []string
+	if strings.HasPrefix(domain, "www.") {
+		modifiedDomains = append(modifiedDomains, domain[4:]) // Try without www
+	} else {
+		modifiedDomains = append(modifiedDomains, "www."+domain) // Try with www
+
+		// For subdomains, try parent domains
+		parts := strings.Split(domain, ".")
+		if len(parts) > 2 {
+			modifiedDomains = append(modifiedDomains, strings.Join(parts[1:], ".")) // Try without subdomain
+		}
+	}
+
+	// Try all modified domains
+	for _, modDomain := range modifiedDomains {
+		if extractor, exists := r.domainExtractors[modDomain]; exists {
+			fmt.Printf("✅ Found modified domain match: %s => %T\n", modDomain, extractor)
+			return extractor
+		}
+	}
+
+	// Log why we're falling back to default
 	if r.defaultExtractor != nil {
+		fmt.Printf("⚠️  No specific extractor found for domain '%s', using default extractor\n", domain)
 		return r.defaultExtractor
 	}
+	
+	fmt.Printf("⚠️  No extractor found for domain '%s' and no default extractor set\n", domain)
 	return &defaultExtractorStub{}
 }
 

@@ -54,7 +54,21 @@ func NewServer(cfg *Config) (*Server, error) {
 	extractorReg.RegisterDomain("www.ntv.com.tr", ntvExt)
 	extractorReg.RegisterDomain("ntv.com.tr", ntvExt)
 
+	// Register Ekonomim extractor
+	ekonomimExt := extractors.NewEkonomimExtractor(nil)
+	// Register all possible domain variations with debug logging
+	log.Println("Registering EkonomimExtractor for domains:")
+	for _, domain := range []string{
+		"ekonomim.com",
+		"www.ekonomim.com",
+		"ekonomim.com.tr",
+		"www.ekonomim.com.tr",
+	} {
+		extractorReg.RegisterDomain(domain, ekonomimExt)
+		log.Printf("- %s\n", domain)
+	}
 
+	// Register CNBCE extractor
 	extractorReg.RegisterDomain("www.cnbce.com", cnbceExt)
 	extractorReg.RegisterDomain("cnbce.com", cnbceExt)
 

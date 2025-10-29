@@ -3,16 +3,16 @@ package extractors
 import (
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
 // EkonomimExtractor handles content extraction for ekonomim.com domain.
-// It processes article URLs on the domain.
+// It processes any URL on the domain without specific pattern filtering.
 type EkonomimExtractor struct {
 	httpClient *http.Client
 }
@@ -35,23 +35,17 @@ func (e *EkonomimExtractor) Extract(input any) (string, []string, error) {
 		return e.extractFromURL(v)
 
 	case map[string]string:
-		// Handle map[string]string with "content" or "html" key
-		if content, ok := v["content"]; ok {
-			return e.cleanContent(content), nil, nil
-		}
+		// Handle map[string]string with "html" key
 		if htmlContent, ok := v["html"]; ok {
 			return e.extractFromHTML(htmlContent)
 		}
 
 	case map[string]interface{}:
-		// Handle map[string]interface{} with "content" or "html" key
-		if content, ok := v["content"].(string); ok && content != "" {
-			return e.cleanContent(content), nil, nil
-		}
-		if htmlContent, ok := v["html"].(string); ok && htmlContent != "" {
+		// Handle map[string]interface{} with "html" key
+		if htmlContent, ok := v["html"].(string); ok {
 			return e.extractFromHTML(htmlContent)
 		}
-		// If no content/html key, try to get URL from common fields
+		// If no html key, try to get URL from common fields
 		if url, ok := v["url"].(string); ok && url != "" {
 			return e.extractFromURL(url)
 		}
@@ -68,41 +62,23 @@ func (e *EkonomimExtractor) Extract(input any) (string, []string, error) {
 
 // extractFromURL fetches the URL and extracts content.
 func (e *EkonomimExtractor) extractFromURL(articleURL string) (string, []string, error) {
-	// Skip processing for filtered URLs
-	filteredPrefixes := []string{
-		"https://www.ekonomim.com/spor/",
-		"https://www.ekonomim.com/dunya/",
-		"https://www.ekonomim.com/foto-galeri/",
-		"https://www.ekonomim.com/finans/",
-		"https://www.ekonomim.com/sektorler/",
-		"https://www.ekonomim.com/yasam/",
-		"https://www.ekonomim.com/ekonomi/",
-		"https://www.ekonomim.com/sirketler/",
-		"https://www.ekonomim.com/yazar/",
-		"https://www.ekonomim.com/yazarlar/",
-		"https://www.ekonomim.com/son-dakika/",
+	req, err := http.NewRequest("GET", articleURL, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	for _, prefix := range filteredPrefixes {
-		if strings.HasPrefix(articleURL, prefix) {
-			return "", nil, fmt.Errorf("URL is in filtered list: %s", articleURL)
-		}
-	}
+	// Set headers to mimic a browser
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 
-	// Basic URL validation
-	if !strings.Contains(articleURL, "ekonomim.com/") || 
-	   !strings.Contains(articleURL, "-") {
-		return "", nil, fmt.Errorf("not a valid Ekonomim article URL: %s", articleURL)
-	}
-
-	resp, err := e.httpClient.Get(articleURL)
+	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
@@ -120,7 +96,7 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// First, try to get the main image from meta tags (most reliable)
+	// Try to get the main image from meta tags (most reliable)
 	var images []string
 	
 	// Try to get the main image from meta tags in order of preference
@@ -149,11 +125,24 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 		}
 	}
 
-	// Get the main content - specifically target div.content-text with property="articleBody"
-	contentDiv := doc.Find(`div.content-text[property="articleBody"]`).First()
-	if contentDiv.Length() == 0 {
-		// Fallback to other possible content containers if the main one is not found
-		contentDiv = doc.Find("div.content-text, div.article-content, article, .content").First()
+	// Get the main content - try multiple selectors to find the main article content
+	var contentDiv *goquery.Selection
+	
+	// Try different selectors in order of preference
+	selectors := []string{
+		`div.content-text[property="articleBody"]`,
+		`div.content-text`,
+		`div[class*="content-text"]`,
+		`div.article-content`,
+		`article`,
+		`.content`,
+	}
+
+	for _, selector := range selectors {
+		contentDiv = doc.Find(selector).First()
+		if contentDiv.Length() > 0 {
+			break
+		}
 	}
 
 	// If we still don't have content, return an error
@@ -166,14 +155,13 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 		.related-news, .tags, .author, .date, .comments, .adpro, the-ads, 
 		.picture-bottom_wrapper, .google-news_wrapper, .mceNonEditable`).Remove()
 
-	// Get the HTML content and clean it up
+	// Clean up the content
 	content, err := contentDiv.Html()
 	if err != nil {
 		return "", images, fmt.Errorf("error getting HTML content: %v", err)
 	}
 
-	// Clean the content by removing any remaining HTML tags
-	content = e.cleanContent(content)
+	content = strings.TrimSpace(html.UnescapeString(content))
 
 	// If no meta tag image found, try to find it in the content
 	if len(images) == 0 {
@@ -203,63 +191,10 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 		})
 	}
 
+	// Ensure we return at least an empty slice, not nil
+	if images == nil {
+		images = []string{}
+	}
+
 	return content, images, nil
-}
-
-// cleanContent removes HTML tags and cleans up the content
-func (e *EkonomimExtractor) cleanContent(content string) string {
-	// Remove CDATA if present
-	content = strings.ReplaceAll(content, "<![CDATA[", "")
-	content = strings.ReplaceAll(content, "]]>", "")
-
-	// Remove HTML tags using a simple regex
-	re := regexp.MustCompile(`<[^>]*>`)
-	content = re.ReplaceAllString(content, "")
-
-	// Replace HTML entities
-	replacer := strings.NewReplacer(
-		"&quot;", "\"",
-		"&amp;", "&",
-		"&lt;", "<",
-		"&gt;", ">",
-		"&nbsp;", " ",
-		"&apos;", "'",
-	)
-	content = replacer.Replace(content)
-
-	// Clean up whitespace
-	content = strings.TrimSpace(content)
-	content = strings.Join(strings.Fields(content), " ")
-
-	return content
-}
-
-// extractImagesFromMeta extracts image URLs from Open Graph and Twitter Card meta tags.
-func (e *EkonomimExtractor) extractImagesFromMeta(doc *goquery.Document) []string {
-	var images []string
-
-	// Check common meta tags for images
-	metaSelectors := []struct {
-		selector string
-		attr     string
-	}{
-		{`meta[property="og:image"]`, "content"},
-		{`meta[name="twitter:image"]`, "content"},
-		{`meta[property="og:image:url"]`, "content"},
-		{`meta[itemprop="image"]`, "content"},
-	}
-
-	for _, meta := range metaSelectors {
-		doc.Find(meta.selector).Each(func(i int, s *goquery.Selection) {
-			if src, exists := s.Attr(meta.attr); exists && src != "" {
-				src = strings.TrimSpace(src)
-				if !strings.HasPrefix(src, "http") {
-					src = "https://www.ekonomim.com" + src
-				}
-				images = append(images, src)
-			}
-		})
-	}
-
-	return images
 }
