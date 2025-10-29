@@ -120,57 +120,85 @@ func (e *EkonomimExtractor) extractFromHTML(htmlContent string) (string, []strin
 		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// Extract main content from content-text div
-	var content string
-	doc.Find(`div.content-text[property="articleBody"]`).Each(func(i int, s *goquery.Selection) {
-		// First, remove all unwanted elements
-		s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
-			.related-news, .tags, .author, .date, .comments, .adpro, the-ads, 
-			.picture-bottom_wrapper, .google-news_wrapper, .mceNonEditable`).Remove()
-		
-		// Get all text nodes and join them with newlines
-		var paragraphs []string
-		s.Find(`p`).Each(func(i int, p *goquery.Selection) {
-			if text := strings.TrimSpace(p.Text()); text != "" {
-				paragraphs = append(paragraphs, text)
-			}
-		})
-		
-		content = strings.Join(paragraphs, "\n\n")
-	})
-
-	// If content not found with specific selector, try fallback selectors
-	if content == "" {
-		doc.Find("div.article-content, article, .content, .article-body").Each(func(i int, s *goquery.Selection) {
-			s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
-				.related-news, .tags, .author, .date, .comments, .adpro, the-ads`).Remove()
-			
-			var paragraphs []string
-			s.Find(`p`).Each(func(i int, p *goquery.Selection) {
-				if text := strings.TrimSpace(p.Text()); text != "" {
-					paragraphs = append(paragraphs, text)
-				}
-			})
-			
-			content = strings.Join(paragraphs, "\n\n")
-		})
+	// First, try to get the main image from meta tags (most reliable)
+	var images []string
+	
+	// Try to get the main image from meta tags in order of preference
+	metaSelectors := []struct {
+		selector string
+		attr     string
+	}{
+		{`meta[property="og:image"]`, "content"},
+		{`meta[name="twitter:image"]`, "content"},
+		{`link[rel="image_src"]`, "href"},
+		{`meta[property="og:image:url"]`, "content"},
 	}
 
-	// Clean the content by removing HTML tags
+	for _, meta := range metaSelectors {
+		if img, exists := doc.Find(meta.selector).First().Attr(meta.attr); exists && img != "" {
+			img = strings.TrimSpace(img)
+			if img != "" {
+				if !strings.HasPrefix(img, "http") && !strings.HasPrefix(img, "//") {
+					img = "https://www.ekonomim.com" + strings.TrimLeft(img, "/")
+				} else if strings.HasPrefix(img, "//") {
+					img = "https:" + img
+				}
+				images = []string{img}
+				break
+			}
+		}
+	}
+
+	// Get the main content - specifically target div.content-text with property="articleBody"
+	contentDiv := doc.Find(`div.content-text[property="articleBody"]`).First()
+	if contentDiv.Length() == 0 {
+		// Fallback to other possible content containers if the main one is not found
+		contentDiv = doc.Find("div.content-text, div.article-content, article, .content").First()
+	}
+
+	// If we still don't have content, return an error
+	if contentDiv.Length() == 0 {
+		return "", images, fmt.Errorf("could not find main content in the page")
+	}
+
+	// Remove unwanted elements that might be inside the content
+	contentDiv.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
+		.related-news, .tags, .author, .date, .comments, .adpro, the-ads, 
+		.picture-bottom_wrapper, .google-news_wrapper, .mceNonEditable`).Remove()
+
+	// Get the HTML content and clean it up
+	content, err := contentDiv.Html()
+	if err != nil {
+		return "", images, fmt.Errorf("error getting HTML content: %v", err)
+	}
+
+	// Clean the content by removing any remaining HTML tags
 	content = e.cleanContent(content)
 
-	// Extract images from meta tags
-	images := e.extractImagesFromMeta(doc)
-
-	// If no images found in meta, try to find in content
+	// If no meta tag image found, try to find it in the content
 	if len(images) == 0 {
-		doc.Find("div.article-content img, article img, .content img").Each(func(i int, s *goquery.Selection) {
+		// Look for images only within the content area
+		contentDiv.Find("img").Each(func(i int, s *goquery.Selection) {
 			if src, exists := s.Attr("src"); exists && src != "" {
 				src = strings.TrimSpace(src)
-				if !strings.HasPrefix(src, "http") {
-					src = "https://www.ekonomim.com" + src
+				if src == "" {
+					return
 				}
-				images = append(images, src)
+
+				// Handle different URL formats
+				if strings.HasPrefix(src, "//") {
+					src = "https:" + src
+				} else if !strings.HasPrefix(src, "http") {
+					src = "https://www.ekonomim.com" + strings.TrimLeft(src, "/")
+				}
+
+				// Skip small images and icons
+				lowerSrc := strings.ToLower(src)
+				if !strings.HasSuffix(lowerSrc, ".svg") && 
+				   !strings.Contains(lowerSrc, "icon") && 
+				   !strings.Contains(lowerSrc, "logo") {
+					images = append(images, src)
+				}
 			}
 		})
 	}
