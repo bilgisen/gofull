@@ -121,16 +121,28 @@ func (e *EkonomimExtractor) extractFromHTML(reader io.Reader) (string, []string,
 		return "", nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// Extract main content
+	// Extract main content from content-text div
 	var content string
-	doc.Find("div.article-content, article, .content, .article-body").Each(func(i int, s *goquery.Selection) {
+	doc.Find(`div.content-text[property="articleBody"]`).Each(func(i int, s *goquery.Selection) {
 		// Remove unwanted elements
-		s.Find("script, style, iframe, noscript, .ad, .advertisement, .social-share, .related-news, .tags, .author, .date, .comments").Remove()
+		s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
+			.related-news, .tags, .author, .date, .comments, .adpro, the-ads`).Remove()
 		
 		// Get the clean HTML
 		html, _ := s.Html()
 		content = strings.TrimSpace(html)
 	})
+
+	// If content not found with specific selector, try fallback selectors
+	if content == "" {
+		doc.Find("div.article-content, article, .content, .article-body").Each(func(i int, s *goquery.Selection) {
+			s.Find(`script, style, iframe, noscript, .ad, .advertisement, .social-share, 
+				.related-news, .tags, .author, .date, .comments, .adpro, the-ads`).Remove()
+			
+			html, _ := s.Html()
+			content = strings.TrimSpace(html)
+		})
+	}
 
 	// Clean the content by removing HTML tags
 	content = e.cleanContent(content)
