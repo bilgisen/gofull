@@ -72,7 +72,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		},
 		BlockedPaths: []string{
 			"/spor/",
-			"/gundem/"
+			"/gundem/",
             "/video-galeri/",
 		},
 	})
