@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -72,7 +73,6 @@ func (e *NTVExtractor) extractFromURL(url string) (string, []string, error) {
 		"https://www.ntv.com.tr/galeri/",
 		"https://www.ntv.com.tr/yazarlar/",
 		"https://www.ntv.com.tr/video/",
-		"https://www.ntv.com.tr/sporskor/",
 		"https://www.ntv.com.tr/otomobil/",
 	}
 

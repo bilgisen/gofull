@@ -6,6 +6,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
