@@ -18,7 +18,7 @@ type Config struct {
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		CacheTTL: 2 * time.Hour,
+		CacheTTL: 5 * time.Minute,
 	}
 }
 
