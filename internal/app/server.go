@@ -83,10 +83,11 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/sirketler/",
             "/sektorler/",
 			"/ekonomi/",
+			"/gundem/",
 		},
 		BlockedPaths: []string{
 			"/spor/",
-			"/gundem/",
+			"/foto-galeri/",
             "/video-galeri/",
 		},
 	})
@@ -95,14 +96,14 @@ func NewServer(cfg *Config) (*Server, error) {
 	filterReg.Register(filters.URLFilter{
 		Domain: "ekonomim.com",
 		AllowedPaths: []string{
-			"/gundem/",
+			"/sektorler/",
 		},
 		BlockedPaths: []string{
 			"/spor/",
 			"/dunya/",
 			"/foto-galeri/",
 			"/finans/",
-			"/sektorler/",
+			"/gundem/",
 			"/yasam/",
 			"/ekonomi/",
 			"/sirketler/",
