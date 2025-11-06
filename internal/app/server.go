@@ -149,6 +149,14 @@ func NewServer(cfg *Config) (*Server, error) {
 		},
 	})
 
+	// Register kisadalga.net filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "kisadalga.net",
+		AllowedPaths: []string{
+			"/haber/gundem/",
+		},
+	})
+
 	// Add more filters here as needed
 	// Example:
 	// filterReg.Register(filters.URLFilter{
