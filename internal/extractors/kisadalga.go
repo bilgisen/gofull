@@ -175,29 +175,24 @@ func (k *KisadalgaExtractor) extractFromHTML(htmlContent string) (string, []stri
 		}
 	}
 
-	// Belirli bir anahtar kelimeyi içeren görsel URL'leri sabit bir URL ile değiştir.
-	// Örnek: .../son-dakika-kirmizi-co9r-cover-blpy_cover.jpg -> https://newstr.netlify.app/public/images/breaking-news.jpg
 	processedImages := []string{}
 	for _, imgURL := range images {
-		// URL'nin son parçasını al (dosya adı)
 		parts := strings.Split(imgURL, "/")
 		if len(parts) > 0 {
 			fileName := parts[len(parts)-1]
-			// Dosya adının belirli bir anahtar kelimeyi içerip içermediğini kontrol et
-			// Örnek: "son-dakika" kelimesini içeriyorsa
-			if strings.Contains(fileName, "son-dakika") { // Buradaki "son-dakika" anahtarını kendi ihtiyacınıza göre değiştirin
-				// Belirli bir anahtar kelimeyi içerenler için sabit URL'yi ekle
+			fileName = strings.Split(fileName, "?")[0]
+			fileName = strings.TrimSpace(html.UnescapeString(fileName))
+			fileName = strings.ToLower(fileName)
+
+			if strings.Contains(fileName, "son-dakika") {
 				processedImages = append(processedImages, "https://newstr.netlify.app/public/images/breaking-news.jpg")
 			} else {
-				// Anahtar kelimeyi içermeyen orijinal URL'yi koru
 				processedImages = append(processedImages, imgURL)
 			}
 		} else {
-			// URL parse edilemediyse, olduğu gibi koru (dikkatli olunmalı)
 			processedImages = append(processedImages, imgURL)
 		}
 	}
-	// İşlenmiş listeyi orijinal images değişkenine atayın
 	images = processedImages
 
 	return content, images, nil
