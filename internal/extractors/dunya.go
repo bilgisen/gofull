@@ -11,7 +11,6 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-
 // DunyaExtractor handles content extraction for dunya.com domain.
 // It processes any URL on the domain without specific pattern filtering.
 type DunyaExtractor struct {
@@ -93,7 +92,7 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 
 	// First, try to get the main image from meta tags (most reliable)
 	var images []string
-	
+
 	// Try to get the main image from meta tags in order of preference
 	metaSelectors := []struct {
 		selector string
@@ -162,15 +161,44 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 
 				// Skip small images and icons
 				lowerSrc := strings.ToLower(src)
-				if !strings.HasSuffix(lowerSrc, ".svg") && 
-				   !strings.Contains(lowerSrc, "icon") && 
-				   !strings.Contains(lowerSrc, "logo") &&
-				   !contains(images, src) {
+				if !strings.HasSuffix(lowerSrc, ".svg") &&
+					!strings.Contains(lowerSrc, "icon") &&
+					!strings.Contains(lowerSrc, "logo") &&
+					!contains(images, src) {
 					images = append(images, src)
 				}
 			}
 		})
 	}
+
+	// Belirli bir anahtar kelimeyi içeren görsel URL'leri sabit bir URL ile değiştir.
+	// Örnek: .../son-dakika-kirmizi-co9r-cover-blpy_cover.jpg -> https://newstr.netlify.app/public/images/breaking-news.jpg
+	processedImages := []string{}
+	for _, imgURL := range images {
+		// URL'nin son parçasını al (dosya adı)
+		parts := strings.Split(imgURL, "/")
+		if len(parts) > 0 {
+			fileName := parts[len(parts)-1]
+			// Dosya adının belirli bir anahtar kelimeyi içerip içermediğini kontrol et
+			// Örnek: "son-dakika" kelimesini içeriyorsa
+			if strings.Contains(fileName, "son-dakika") { // Buradaki "son-dakika" anahtarını kendi ihtiyacınıza göre değiştirin
+				// Belirli bir anahtar kelimeyi içerenler için sabit URL'yi ekle
+				// Sadece bu sabit URL'yi bir kez eklemek istiyorsanız ve diğerlerini elemek istiyorsanız:
+				// processedImages = []string{"https://newstr.netlify.app/public/images/breaking-news.jpg"}
+				// Ancak genelde diğer geçerli görselleri de korumak istersiniz.
+				// O zaman, anahtar kelimeyi içerenleri sabit URL ile değiştir, diğerlerini olduğu gibi bırak:
+				processedImages = append(processedImages, "https://newstr.netlify.app/public/images/breaking-news.jpg")
+			} else {
+				// Anahtar kelimeyi içermeyen orijinal URL'yi koru
+				processedImages = append(processedImages, imgURL)
+			}
+		} else {
+			// URL parse edilemediyse, olduğu gibi koru (dikkatli olunmalı)
+			processedImages = append(processedImages, imgURL)
+		}
+	}
+	// İşlenmiş listeyi orijinal images değişkenine atayın
+	images = processedImages
 
 	// Ensure we return at least an empty slice, not nil
 	if images == nil {
@@ -178,4 +206,15 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 	}
 
 	return content, images, nil
+}
+
+// contains, bir string slice'ın belirli bir string içerip içermediğini kontrol eder.
+// Kodunuzda kullanılmıştı ama tanımlı değil gibi görünüyordu, dolayısıyla ekledim.
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
