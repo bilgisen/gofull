@@ -200,14 +200,3 @@ func (d *DunyaExtractor) extractFromHTML(htmlContent string) (string, []string, 
 
 	return content, images, nil
 }
-
-// contains, bir string slice'ın belirli bir string içerip içermediğini kontrol eder.
-// Kodunuzda kullanılmıştı ama tanımlı değil gibi görünüyordu, dolayısıyla ekledim.
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
