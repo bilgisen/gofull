@@ -54,6 +54,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	extractorReg.RegisterDomain("www.ntv.com.tr", ntvExt)
 	extractorReg.RegisterDomain("ntv.com.tr", ntvExt)
 
+	// Register T24 extractor
+	t24Ext := extractors.NewT24Extractor(nil)
+	extractorReg.RegisterDomain("www.t24.com.tr", t24Ext)
+	extractorReg.RegisterDomain("t24.com.tr", t24Ext)
+
 	ekonomimExt := extractors.NewEkonomimExtractor(nil)
 	log.Println("Registering EkonomimExtractor for domains:")
 	for _, domain := range []string{
@@ -136,7 +141,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/kultur-ve-sanat",
 			"/dunya",
 			"/teknoloji",
-			"/sporskor",
+			"/turkiye",
 		},
 		BlockedPaths: []string{
 			"/foto-galeri",
@@ -147,7 +152,6 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/saglikli-yasam",
 			"/yazarlar",
 			"//video",
-			"/turkiye",
 			"/son-dakika",
 			"/gundem",
 		},
