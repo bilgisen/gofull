@@ -208,6 +208,12 @@ func (e *NTVExtractor) extractImagesFromMeta(doc *goquery.Document) []string {
 				if !strings.HasPrefix(url, "http") {
 					url = "https://www.ntv.com.tr" + url
 				}
+				
+				// Replace son-dakika images with the specified URL
+				if strings.Contains(url, "son-dakika-gorselleri") || strings.Contains(url, "son-dakika") {
+					url = "https://inewstr.netlify.app/breaking.jpg"
+				}
+				
 				images = append(images, url)
 			}
 		})

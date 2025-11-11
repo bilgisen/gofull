@@ -191,9 +191,10 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/yasam",
 			"/saglikli-yasam",
 			"/yazarlar",
-			"//video",
+			"/video",
 			"/son-dakika",
 			"/gundem",
+			"/video/turkiye",
 		},
 	})
 
