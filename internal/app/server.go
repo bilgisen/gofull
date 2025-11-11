@@ -2,6 +2,7 @@
 package app
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -55,9 +56,48 @@ func NewServer(cfg *Config) (*Server, error) {
 	extractorReg.RegisterDomain("ntv.com.tr", ntvExt)
 
 	// Register T24 extractor
-	t24Ext := extractors.NewT24Extractor(nil)
+	log.Println("\n=== BEFORE T24 Extractor Registration ===")
+	for domain, extractor := range extractorReg.DomainExtractors() {
+		log.Printf("Before: %s => %T\n", domain, extractor)
+	}
+	
+	// Create a new T24 extractor with a custom HTTP client that follows redirects
+	httpClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			log.Printf("Following redirect from %s to %s\n", via[0].URL, req.URL)
+			return nil
+		},
+	}
+	t24Ext := extractors.NewT24Extractor(httpClient)
+	
+	log.Println("\n=== REGISTERING T24 Extractor ===")
+	log.Printf("T24 Extractor type: %T, value: %+v\n", t24Ext, t24Ext)
+	
+	// Register both with and without www
+	log.Println("Registering T24 extractor for domains: t24.com.tr, www.t24.com.tr")
 	extractorReg.RegisterDomain("www.t24.com.tr", t24Ext)
 	extractorReg.RegisterDomain("t24.com.tr", t24Ext)
+	
+	// Verify registration
+	log.Println("\n=== AFTER T24 Extractor Registration ===")
+	registered := false
+	for domain, extractor := range extractorReg.DomainExtractors() {
+		log.Printf("After: %s => %T\n", domain, extractor)
+		if domain == "t24.com.tr" || domain == "www.t24.com.tr" {
+			registered = true
+		}
+	}
+	if !registered {
+		log.Println(" ERROR: T24 extractor was not registered! This is a critical error.")
+		// Print the actual state of the domainExtractors map
+		log.Println("Current domainExtractors state:")
+		for domain, extractor := range extractorReg.DomainExtractors() {
+			log.Printf("- %s => %T\n", domain, extractor)
+		}
+	} else {
+		log.Println(" T24 extractor registered successfully")
+	}
+	log.Println("===================================\n")
 
 	ekonomimExt := extractors.NewEkonomimExtractor(nil)
 	log.Println("Registering EkonomimExtractor for domains:")
@@ -181,6 +221,27 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/", s.handleHome)
 	s.mux.Handle("/feed", feedHandler)
 	s.mux.HandleFunc("/health", s.handleHealth)
+	
+	// Add extract endpoint
+	s.mux.HandleFunc("/extract", func(w http.ResponseWriter, r *http.Request) {
+		url := r.URL.Query().Get("url")
+		if url == "" {
+			http.Error(w, "Missing 'url' parameter", http.StatusBadRequest)
+			return
+		}
+
+		// Extract content using the extractor registry
+		extractor := s.extractorReg.ForURL(url)
+		content, _, err := extractor.Extract(url)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error extracting content: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Return the extracted content as plain text
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(content))
+	})
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
