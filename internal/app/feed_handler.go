@@ -171,6 +171,7 @@ func getCategoryFromURL(url string) string {
 	   strings.Contains(url, "/sirket/") || 
 	   strings.Contains(url, "/borsa/") || 
 	   strings.Contains(url, "/kobi/") || 
+	   strings.Contains(url, "/ntvpara/") || 
 	   strings.Contains(url, "/finans/") {
 		return "business"
 	}
@@ -191,7 +192,7 @@ func getCategoryFromURL(url string) string {
 	
 	// Entertainment
 	if strings.Contains(url, "/magazin/") || 
-	   strings.Contains(url, "/nlife/") || 
+	   strings.Contains(url, "/kultur/") || 
 	   strings.Contains(url, "/sanat/") {
 		return "entertainment"
 	}
