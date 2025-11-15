@@ -48,6 +48,7 @@ type Item struct {
 	Description string `json:"description,omitempty"`
 	Content     string `json:"content,omitempty"`
 	Image       string `json:"image,omitempty"`
+	Category    string `json:"category,omitempty"`
 }
 
 // ServeHTTP implements http.Handler for FeedHandler.
@@ -143,6 +144,61 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonBytes)
 }
 
+// getCategoryFromURL determines the category of a news article based on its URL
+func getCategoryFromURL(url string) string {
+	url = strings.ToLower(url)
+	
+	// Turkish news
+	if strings.Contains(url, "/gundem/") || 
+	   strings.Contains(url, "/turkiye/") || 
+	   strings.Contains(url, "/politika/") || 
+	   strings.Contains(url, "/siyaset/") || 
+	   strings.Contains(url, "/haber/") {
+		return "turkiye"
+	}
+	
+	// World news
+	if strings.Contains(url, "/dunya/") || 
+	   strings.Contains(url, "/abd/") || 
+	   strings.Contains(url, "/israil/") || 
+	   strings.Contains(url, "/avrupa/") {
+		return "world"
+	}
+	
+	// Business
+	if strings.Contains(url, "/ekonomi/") || 
+	   strings.Contains(url, "/sektorler/") || 
+	   strings.Contains(url, "/sirket/") || 
+	   strings.Contains(url, "/borsa/") || 
+	   strings.Contains(url, "/kobi/") || 
+	   strings.Contains(url, "/finans/") {
+		return "business"
+	}
+	
+	// Technology
+	if strings.Contains(url, "/teknoloji/") || 
+	   strings.Contains(url, "/bilisim/") || 
+	   strings.Contains(url, "/bilim/") {
+		return "technology"
+	}
+	
+	// Health
+	if strings.Contains(url, "/saglik/") || 
+	   strings.Contains(url, "/health/") || 
+	   strings.Contains(url, "/saglikli-yasam/") {
+		return "health"
+	}
+	
+	// Entertainment
+	if strings.Contains(url, "/magazin/") || 
+	   strings.Contains(url, "/nlife/") || 
+	   strings.Contains(url, "/sanat/") {
+		return "entertainment"
+	}
+	
+	return "turkiye" // Default category
+}
+
 // processItem extracts content and image using registered extractors.
 func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 	content := i.Content
@@ -220,6 +276,9 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 		log.Printf("🖼️  Found image from feed item: %s", imageURL)
 	}
 
+	// Determine category from URL
+	category := getCategoryFromURL(i.Link)
+
 	return Item{
 		Title:       i.Title,
 		Link:        i.Link,
@@ -228,6 +287,7 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 		Description: i.Description,
 		Content:     strings.TrimSpace(content),
 		Image:       imageURL,
+		Category:    category,
 	}
 }
 
