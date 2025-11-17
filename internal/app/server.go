@@ -132,12 +132,16 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/sirketler/",
 			"/sektorler/",
 			"/ekonomi/",
-			"/gundem/",
 		},
 		BlockedPaths: []string{
 			"/spor/",
 			"/foto-galeri/",
 			"/video-galeri/",
+			"/gundem/",
+			"/son-dakika/",
+			"/dunya/",
+			"/kultur-sanat/",
+			"/kose-yazisi/",
 		},
 	})
 
@@ -146,19 +150,20 @@ func NewServer(cfg *Config) (*Server, error) {
 		Domain: "ekonomim.com",
 		AllowedPaths: []string{
 			"/sektorler/",
+			"/sirketler/",
+			"/ekonomi/",
+			"/finans/",
 		},
 		BlockedPaths: []string{
 			"/spor/",
 			"/dunya/",
 			"/foto-galeri/",
-			"/finans/",
 			"/gundem/",
 			"/yasam/",
-			"/ekonomi/",
-			"/sirketler/",
 			"/yazar/",
 			"/yazarlar/",
 			"/son-dakika/",
+			"/saglik/",
 		},
 	})
 
@@ -182,6 +187,8 @@ func NewServer(cfg *Config) (*Server, error) {
 			"/dunya",
 			"/teknoloji",
 			"/turkiye",
+			"/ntvpara",
+			"/ekonomi",
 		},
 		BlockedPaths: []string{
 			"/foto-galeri",
