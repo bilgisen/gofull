@@ -56,51 +56,18 @@ func NewServer(cfg *Config) (*Server, error) {
 	extractorReg.RegisterDomain("ntv.com.tr", ntvExt)
 
 	// Register T24 extractor
-	log.Println("\n=== BEFORE T24 Extractor Registration ===")
-	for domain, extractor := range extractorReg.DomainExtractors() {
-		log.Printf("Before: %s => %T\n", domain, extractor)
-	}
-	
 	// Create a new T24 extractor with a custom HTTP client that follows redirects
 	httpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			log.Printf("Following redirect from %s to %s\n", via[0].URL, req.URL)
 			return nil
 		},
 	}
 	t24Ext := extractors.NewT24Extractor(httpClient)
-	
-	log.Println("\n=== REGISTERING T24 Extractor ===")
-	log.Printf("T24 Extractor type: %T, value: %+v\n", t24Ext, t24Ext)
-	
 	// Register both with and without www
-	log.Println("Registering T24 extractor for domains: t24.com.tr, www.t24.com.tr")
 	extractorReg.RegisterDomain("www.t24.com.tr", t24Ext)
 	extractorReg.RegisterDomain("t24.com.tr", t24Ext)
-	
-	// Verify registration
-	log.Println("\n=== AFTER T24 Extractor Registration ===")
-	registered := false
-	for domain, extractor := range extractorReg.DomainExtractors() {
-		log.Printf("After: %s => %T\n", domain, extractor)
-		if domain == "t24.com.tr" || domain == "www.t24.com.tr" {
-			registered = true
-		}
-	}
-	if !registered {
-		log.Println(" ERROR: T24 extractor was not registered! This is a critical error.")
-		// Print the actual state of the domainExtractors map
-		log.Println("Current domainExtractors state:")
-		for domain, extractor := range extractorReg.DomainExtractors() {
-			log.Printf("- %s => %T\n", domain, extractor)
-		}
-	} else {
-		log.Println(" T24 extractor registered successfully")
-	}
-	log.Println("===================================\n")
 
 	ekonomimExt := extractors.NewEkonomimExtractor(nil)
-	log.Println("Registering EkonomimExtractor for domains:")
 	for _, domain := range []string{
 		"ekonomim.com",
 		"www.ekonomim.com",
@@ -108,17 +75,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		"www.ekonomim.com.tr",
 	} {
 		extractorReg.RegisterDomain(domain, ekonomimExt)
-		log.Printf("- %s\n", domain)
 	}
 
-	// ✅ Register Kisadalga extractor (the missing part)
+	// Register Kisadalga extractor
 	kisadalgaExt := extractors.NewKisadalgaExtractor(nil)
 	for _, domain := range []string{
 		"kisadalga.net",
 		"www.kisadalga.net",
 	} {
 		extractorReg.RegisterDomain(domain, kisadalgaExt)
-		log.Printf("Registered KisadalgaExtractor for %s\n", domain)
 	}
 
 	// Setup filter registry
@@ -209,7 +174,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	filterReg.Register(filters.URLFilter{
 		Domain: "kisadalga.net",
 		AllowedPaths: []string{
-			"/haber/gundem/",
+			"/haber/politika/",
 		},
 	})
 
