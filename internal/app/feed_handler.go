@@ -172,6 +172,12 @@ func getCategoryFromURL(url string) string {
 	   strings.Contains(url, "/borsa/") || 
 	   strings.Contains(url, "/kobi/") || 
 	   strings.Contains(url, "/ntvpara/") || 
+	   strings.Contains(url, "/piyasalar/") || 
+	   strings.Contains(url, "/veriler/") || 
+	   strings.Contains(url, "/enerji/") || 
+	   strings.Contains(url, "/gayrimenkul/") || 
+	   strings.Contains(url, "/is-dunyasi/") || 
+	   strings.Contains(url, "/sirket-haberleri/") || 
 	   strings.Contains(url, "/finans/") {
 		return "business"
 	}

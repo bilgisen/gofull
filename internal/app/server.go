@@ -135,6 +135,14 @@ func NewServer(cfg *Config) (*Server, error) {
 	// cnbce.com filters
 	filterReg.Register(filters.URLFilter{
 		Domain: "cnbce.com",
+		AllowedPaths: []string{
+			"/sirket-haberleri/",
+			"/piyasalar/",
+			"/veriler/",
+			"/enerji/",
+			"/gayrimenkul/",
+			"/is-dunyasi/",
+		},
 		BlockedPaths: []string{
 			"/haberler",
 			"/tv",
