@@ -86,6 +86,24 @@ func NewServer(cfg *Config) (*Server, error) {
 		extractorReg.RegisterDomain(domain, kisadalgaExt)
 	}
 
+	// Register Ilketv extractor
+	ilketvExt := extractors.NewIlketvExtractor(nil)
+	for _, domain := range []string{
+		"ilketv.com.tr",
+		"www.ilketv.com.tr",
+	} {
+		extractorReg.RegisterDomain(domain, ilketvExt)
+	}
+
+	// Register Artigercek extractor
+	artigercekExt := extractors.NewArtigercekExtractor(nil)
+	for _, domain := range []string{
+		"artigercek.com",
+		"www.artigercek.com",
+	} {
+		extractorReg.RegisterDomain(domain, artigercekExt)
+	}
+
 	// Setup filter registry
 	filterReg := filters.NewFilterRegistry()
 
@@ -183,6 +201,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		Domain: "kisadalga.net",
 		AllowedPaths: []string{
 			"/haber/politika/",
+		},
+	})
+
+	// ilketv.com.tr filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "ilketv.com.tr",
+	})
+
+	// artigercek.com filters
+	filterReg.Register(filters.URLFilter{
+		Domain: "artigercek.com",
+		AllowedPaths: []string{
+			"/politika/",
 		},
 	})
 

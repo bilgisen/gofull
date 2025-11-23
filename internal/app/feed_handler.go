@@ -286,13 +286,21 @@ func (h *FeedHandler) processItem(i *gofeed.Item) Item {
 	// Determine category from URL
 	category := getCategoryFromURL(i.Link)
 
+	// Clean HTML tags from description
+	cleanDescription := cleanHTMLTags(i.Description)
+	log.Printf("🧹 Cleaned description (original length: %d, cleaned length: %d)", len(i.Description), len(cleanDescription))
+
+	// Remove "(Haber Merkezi)" from content
+	cleanContent := removeHaberMerkezi(strings.TrimSpace(content))
+	log.Printf("🧹 Cleaned content (original length: %d, cleaned length: %d)", len(content), len(cleanContent))
+
 	return Item{
 		Title:       i.Title,
 		Link:        i.Link,
 		GUID:        extractors.GenerateGUIDFromURL(i.Link),
 		Published:   formatTime(i.PublishedParsed),
-		Description: i.Description,
-		Content:     strings.TrimSpace(content),
+		Description: cleanDescription,
+		Content:     cleanContent,
 		Image:       imageURL,
 		Category:    category,
 	}
@@ -430,4 +438,33 @@ func cleanHTMLContent(htmlContent string) string {
 	htmlStr = regexp.MustCompile(`<\w+\s*(?:[^>]*)>\s*<\/\w+\s*>`).ReplaceAllString(htmlStr, "")
 
 	return htmlStr
+}
+
+// cleanHTMLTags removes HTML tags from text and decodes HTML entities
+func cleanHTMLTags(text string) string {
+	// Remove HTML tags using regex
+	re := regexp.MustCompile(`<[^>]*>`)
+	text = re.ReplaceAllString(text, "")
+
+	// Decode HTML entities
+	text = html.UnescapeString(text)
+
+	// Clean up whitespace
+	text = strings.TrimSpace(text)
+	text = strings.Join(strings.Fields(text), " ")
+
+	return text
+}
+
+// removeHaberMerkezi removes "(Haber Merkezi)" from the end of content
+func removeHaberMerkezi(content string) string {
+	// Remove "(Haber Merkezi)" with various whitespace patterns
+	re := regexp.MustCompile(`\s*\(\s*Haber\s+Merkezi\s*\)\s*$`)
+	content = re.ReplaceAllString(content, "")
+
+	// Also remove without parentheses
+	re2 := regexp.MustCompile(`\s*Haber\s+Merkezi\s*$`)
+	content = re2.ReplaceAllString(content, "")
+
+	return strings.TrimSpace(content)
 }
